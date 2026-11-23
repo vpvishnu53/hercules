@@ -1,6 +1,6 @@
-# Workout Tracker
+# Hercules
 
-A mobile-first workout log. Log a set in one or two taps, see your PRs ("milestones"), and browse past sessions on a calendar. Plain HTML, CSS and JavaScript, with no framework, build step or dependencies.
+Hercules is a mobile-first workout log. Log a set in one or two taps, see your PRs ("milestones"), and browse past sessions on a calendar. Plain HTML, CSS and JavaScript, with no framework, build step or dependencies.
 
 ## Run it locally
 

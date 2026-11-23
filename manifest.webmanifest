@@ -1,7 +1,7 @@
 {
-  "name": "Workout Tracker",
-  "short_name": "Workouts",
-  "description": "Log sets fast, track PRs and see your training calendar.",
+  "name": "Hercules",
+  "short_name": "Hercules",
+  "description": "Hercules: log sets fast, track PRs and see your training calendar.",
   "start_url": "./index.html#log",
   "scope": "./",
   "display": "standalone",
