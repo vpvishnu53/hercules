@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workout Tracker tests</title>
+<style>
+  body { font: 14px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; background: #F3F5F3; color: #0F1A13; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 20px 0 6px; }
+  #summary { font-weight: 700; margin-bottom: 8px; }
+  #summary.ok { color: #0F6B3A; } #summary.bad { color: #B00E28; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { padding: 3px 0; border-bottom: 1px solid #D6DDD7; }
+  li.fail { color: #B00E28; }
+  li .msg { display: block; font: 12px ui-monospace, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Workout Tracker tests</h1>
+<p>Runs against an in-memory copy of the store. Your saved data is never touched.</p>
+<div id="summary">Running…</div>
+<div id="out"></div>
+
+<script src="storage.js"></script>
+<script>
+/* ---------- Tiny test runner ---------- */
+const groups = [];
+function group(name, fn) { groups.push({ name, fn }); }
+class AssertionError extends Error {}
+function eq(actual, expected, label = '') {
+  const a = JSON.stringify(actual), e = JSON.stringify(expected);
+  if (a !== e) throw new AssertionError(`${label}\n  expected ${e}\n  got      ${a}`);
+}
+function ok(cond, label = 'expected true') { if (!cond) throw new AssertionError(label); }
+async function rejects(promise, match, label = '') {
+  try { await promise; } catch (err) {
+    if (match && !String(err.message).includes(match)) throw new AssertionError(`${label} wrong error: ${err.message}`);
+    return err;
+  }
+  throw new AssertionError(`${label} expected an error`);
+}
+
+/** In-memory backend, also used to inspect what was saved. */
+function memoryBackend(initial = null) {
+  let saved = initial ? JSON.stringify(initial) : null;
+  return {
+    saves: 0,
+    failNext: false,
+    async load() { return saved ? JSON.parse(saved) : null; },
+    async save(db) {
+      if (this.failNext) { this.failNext = false; throw new Store.StoreError('disk full', 'quota'); }
+      this.saves++; saved = JSON.stringify(db);
+    },
+    raw() { return saved ? JSON.parse(saved) : null; },
+  };
+}
+async function freshStore(initial) { const b = memoryBackend(initial); await Store.init(b); return b; }
+
+async function runAll() {
+  const out = document.getElementById('out');
+  let pass = 0, fail = 0;
+  for (const g of groups) {
+    const h = document.createElement('h2'); h.textContent = g.name; out.append(h);
+    const ul = document.createElement('ul'); out.append(ul);
+    const tests = [];
+    g.fn((name, fn) => tests.push({ name, fn }));
+    for (const t of tests) {
+      const li = document.createElement('li');
+      try { await t.fn(); li.textContent = '✓ ' + t.name; pass++; }
+      catch (err) {
+        li.className = 'fail'; li.textContent = '✗ ' + t.name; fail++;
+        const m = document.createElement('span'); m.className = 'msg'; m.textContent = err.message; li.append(m);
+      }
+      ul.append(li);
+    }
+  }
+  const s = document.getElementById('summary');
+  s.textContent = fail ? `${fail} failed, ${pass} passed` : `All ${pass} tests passed`;
+  s.className = fail ? 'bad' : 'ok';
+  window.__results = { pass, fail };
+}
+
+/* ======================= Storage tests ======================= */
+group('Storage', (test) => {
+  test('fresh store has presets, no split, default settings', async () => {
+    const b = await freshStore();
+    const ex = await Store.listExercises();
+    ok(ex.length >= 30, 'has preset exercises');
+    ok(ex.some((e) => e.id === 'ex_bench-press'), 'bench press preset id is stable');
+    eq(await Store.listSessionTypes(), [], 'no default split');
+    const s = await Store.getSettings();
+    eq([s.units, s.rpeEnabled, s.restTimer.enabled, s.restTimer.autoStart, s.schedule.enabled],
+       ['kg', false, false, false, false]);
+    ok(b.raw() !== null, 'saved on first launch');
+  });
+
+  test('settings merge nested values', async () => {
+    await freshStore();
+    await Store.updateSettings({ units: 'lb', restTimer: { enabled: true } });
+    const s = await Store.getSettings();
+    eq([s.units, s.restTimer.enabled, s.restTimer.durationSec], ['lb', true, 120]);
+    await rejects(Store.updateSettings({ units: 'stone' }), 'kg or lb');
+  });
+
+  test('custom exercise: add, duplicate name rejected, rename keeps history', async () => {
+    await freshStore();
+    const ex = await Store.addExercise({ name: '  Landmine   Press ', group: 'shoulders' });
+    eq(ex.name, 'Landmine Press');
+    await rejects(Store.addExercise({ name: 'landmine press' }), 'already have');
+    const s = await Store.startSession();
+    await Store.addSet(s.id, { exerciseId: ex.id, weightKg: 30, reps: 10 });
+    await Store.updateExercise(ex.id, { name: 'Landmine Push Press' });
+    const got = await Store.getSession(s.id);
+    eq(got.sets[0].exerciseId, ex.id, 'set still points at the same exercise');
+    eq((await Store.getExercise(ex.id)).name, 'Landmine Push Press');
+  });
+
+  test('split: create, validate, delete clears schedule', async () => {
+    await freshStore();
+    const push = await Store.saveSessionType({ name: 'Push', items: [
+      { exerciseId: 'ex_bench-press', targetSets: 3 }, { exerciseId: 'ex_overhead-press', targetSets: 3 }] });
+    await rejects(Store.saveSessionType({ name: 'push' }), 'already have');
+    await rejects(Store.saveSessionType({ name: 'Bad', items: [{ exerciseId: 'ex_bench-press', targetSets: 0 }] }), 'Target sets');
+    await Store.updateSettings({ schedule: { enabled: true, days: { 1: push.id } } });
+    eq((await Store.getSettings()).schedule.days[1], push.id);
+    await Store.deleteSessionType(push.id);
+    eq((await Store.getSettings()).schedule.days[1], null);
+  });
+
+  test('session start: one active at a time, split pre-selects first exercise', async () => {
+    await freshStore();
+    const push = await Store.saveSessionType({ name: 'Push', items: [{ exerciseId: 'ex_bench-press', targetSets: 3 }] });
+    const s = await Store.startSession({ sessionTypeId: push.id });
+    eq(s.currentExerciseId, 'ex_bench-press');
+    eq(s.date, Store.util.dateKey());
+    await rejects(Store.startSession(), 'Finish the current session');
+  });
+
+  test('resumed session keeps the day it was started', async () => {
+    const b = await freshStore();
+    const s = await Store.startSession({ date: '2026-11-20' });
+    await Store.addSet(s.id, { exerciseId: 'ex_bench-press', weightKg: 80, reps: 8 });
+    await Store.init(memoryBackend(b.raw()));      // simulate reopening the app later
+    const active = await Store.getActiveSession();
+    eq([active.id, active.date, active.sets.length], [s.id, '2026-11-20', 1]);
+    await Store.finishSession(s.id);
+    eq((await Store.getSession(s.id)).date, '2026-11-20', 'still the start day after finishing');
+    eq(await Store.getActiveSession(), null);
+  });
+
+  test('sets: bodyweight, assisted, validation, drop sets', async () => {
+    await freshStore();
+    const s = await Store.startSession();
+    const bw = await Store.addSet(s.id, { exerciseId: 'ex_pull-up', weightKg: null, reps: 10 });
+    const asst = await Store.addSet(s.id, { exerciseId: 'ex_pull-up', weightKg: -20, reps: 8 });
+    eq([bw.weightKg, asst.weightKg, bw.kind], [null, -20, 'main']);
+    await rejects(Store.addSet(s.id, { exerciseId: 'ex_pull-up', weightKg: 10, reps: 0 }), 'Reps');
+    await rejects(Store.addSet(s.id, { exerciseId: 'ex_pull-up', weightKg: 10, reps: 5, rpe: 8.3 }), 'RPE');
+    const drop = await Store.addSet(s.id, { parentId: asst.id, weightKg: -40, reps: 4, exerciseId: 'ignored' });
+    eq([drop.kind, drop.exerciseId, drop.parentId], ['drop', 'ex_pull-up', asst.id]);
+    await rejects(Store.addSet(s.id, { parentId: drop.id, weightKg: 0, reps: 1 }), 'drop set must belong');
+  });
+
+  test('deleting a main set deletes its drops; edit changes values', async () => {
+    await freshStore();
+    const s = await Store.startSession();
+    const a = await Store.addSet(s.id, { exerciseId: 'ex_bench-press', weightKg: 80, reps: 8 });
+    await Store.addSet(s.id, { parentId: a.id, weightKg: 60, reps: 10 });
+    await Store.addSet(s.id, { parentId: a.id, weightKg: 40, reps: 12 });
+    const b2 = await Store.addSet(s.id, { exerciseId: 'ex_bench-press', weightKg: 80, reps: 7 });
+    await Store.updateSet(s.id, b2.id, { reps: 6, note: 'grip slipped' });
+    const removed = await Store.deleteSet(s.id, a.id);
+    eq(removed.length, 3);
+    const got = await Store.getSession(s.id);
+    eq(got.sets.map((x) => [x.reps, x.note]), [[6, 'grip slipped']]);
+  });
+
+  test('failed save leaves data unchanged', async () => {
+    const b = await freshStore();
+    const s = await Store.startSession();
+    b.failNext = true;
+    await rejects(Store.addSet(s.id, { exerciseId: 'ex_bench-press', weightKg: 80, reps: 8 }), 'disk full');
+    eq((await Store.getSession(s.id)).sets.length, 0, 'set was not added in memory');
+    await Store.addSet(s.id, { exerciseId: 'ex_bench-press', weightKg: 80, reps: 8 });
+    eq((await Store.getSession(s.id)).sets.length, 1, 'next write still works');
+  });
+
+  test('returned objects are copies', async () => {
+    await freshStore();
+    const s = await Store.getSettings();
+    s.units = 'lb';
+    eq((await Store.getSettings()).units, 'kg');
+  });
+
+  test('sessions list sorted by date, filtered by range', async () => {
+    await freshStore();
+    for (const date of ['2026-11-03', '2026-11-01', '2026-11-02']) {
+      const s = await Store.startSession({ date });
+      await Store.finishSession(s.id);
+    }
+    eq((await Store.listSessions()).map((s) => s.date), ['2026-11-01', '2026-11-02', '2026-11-03']);
+    eq((await Store.listSessions({ from: '2026-11-02' })).length, 2);
+  });
+
+  test('two sessions on one day are both kept', async () => {
+    await freshStore();
+    const a = await Store.startSession({ date: '2026-11-05' }); await Store.finishSession(a.id);
+    const b = await Store.startSession({ date: '2026-11-05' }); await Store.finishSession(b.id);
+    eq((await Store.listSessions({ from: '2026-11-05', to: '2026-11-05' })).length, 2);
+  });
+
+  test('bodyweight: session weigh-in replaces, stand-alone adds', async () => {
+    await freshStore();
+    const s = await Store.startSession({ date: '2026-11-10' });
+    await Store.logBodyweight({ sessionId: s.id, kg: 80 });
+    await Store.logBodyweight({ sessionId: s.id, kg: 80.4 });
+    await Store.logBodyweight({ date: '2026-11-11', kg: 80.1 });
+    const list = await Store.listBodyweights();
+    eq(list.map((b) => [b.date, b.kg]), [['2026-11-10', 80.4], ['2026-11-11', 80.1]]);
+    await Store.deleteSession(s.id);
+    eq((await Store.listBodyweights()).length, 1, 'session weigh-in removed with the session');
+  });
+
+  test('milestones: add, replace keeps ids for the same set, delete with session', async () => {
+    await freshStore();
+    const s = await Store.startSession({ date: '2026-11-10' });
+    const [m] = await Store.addMilestones([{ exerciseId: 'ex_bench-press', sessionId: s.id, setId: 'set_a',
+      type: 'weight', weightKg: 100, reps: 3, date: '2026-11-10', loggedAt: 't1' }]);
+    const next = await Store.replaceExerciseMilestones('ex_bench-press', [
+      { sessionId: s.id, setId: 'set_a', type: 'weight', weightKg: 100, reps: 3, date: '2026-11-10', loggedAt: 't1' },
+      { sessionId: s.id, setId: 'set_b', type: 'reps', weightKg: 90, reps: 6, date: '2026-11-10', loggedAt: 't2' }]);
+    eq(next[0].id, m.id, 'same set keeps its milestone id');
+    eq((await Store.listMilestones({ exerciseId: 'ex_bench-press' })).length, 2);
+    await Store.deleteSession(s.id);
+    eq((await Store.listMilestones()).length, 0);
+  });
+
+  test('export → import round trip', async () => {
+    await freshStore();
+    await Store.updateSettings({ units: 'lb' });
+    await Store.addExercise({ name: 'Zercher Squat', group: 'legs' });
+    const s = await Store.startSession({ date: '2026-11-12' });
+    await Store.addSet(s.id, { exerciseId: 'ex_back-squat', weightKg: 102.0582, reps: 5 });
+    const file = JSON.parse(JSON.stringify(await Store.exportData()));
+    eq(file.app, 'workout-tracker');
+    await freshStore();
+    const res = await Store.importData(file);
+    eq(res.sessions, 1);
+    eq((await Store.getSettings()).units, 'lb');
+    eq((await Store.getSession(s.id)).sets[0].weightKg, 102.0582, 'full precision kept');
+    ok((await Store.listExercises()).some((e) => e.name === 'Zercher Squat'));
+  });
+
+  test('import rejects bad files and keeps existing data', async () => {
+    await freshStore();
+    const s = await Store.startSession();
+    await rejects(Store.importData({ hello: 'world' }), "can't be imported");
+    await rejects(Store.importData({ exercises: [], sessions: [{ id: 'x', date: 'yesterday', sets: [] }] }), 'invalid date');
+    await rejects(Store.importData({ schemaVersion: 99, exercises: [], sessions: [] }), 'newer version');
+    ok(await Store.getSession(s.id), 'existing session still there');
+  });
+
+  test('unreadable saved data is backed up, never overwritten', async () => {
+    const fake = { data: { 'workoutTracker.v1': '{broken' }, getItem(k) { return this.data[k] ?? null; },
+      setItem(k, v) { this.data[k] = v; } };
+    await rejects(Store.init(Store.createLocalBackend('workoutTracker.v1', fake)), 'could not be read');
+    eq(fake.data['workoutTracker.v1'], '{broken', 'original left alone');
+    ok(Object.keys(fake.data).some((k) => k.startsWith('workoutTracker.v1.unreadable.')), 'backup copy made');
+  });
+
+  test('older data gets new defaults and presets filled in', async () => {
+    await freshStore({ schemaVersion: 1, settings: { units: 'lb' }, exercises: [], sessions: [] });
+    const s = await Store.getSettings();
+    eq([s.units, s.restTimer.durationSec, s.schedule.enabled], ['lb', 120, false]);
+    ok((await Store.listExercises()).length >= 30);
+  });
+});
+
+runAll();
+</script>
+</body>
+</html>
