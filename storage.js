@@ -111,6 +111,13 @@
   function checkReps(r) {
     assert(Number.isInteger(r) && r >= 1 && r <= 1000, 'Reps must be a whole number of 1 or more.');
   }
+  /** A built-in group id, or a custom group name of up to 24 characters. */
+  function checkGroup(group) {
+    const g = cleanName(group);
+    assert(g, 'Pick a group.');
+    assert(g.length <= 24, 'Keep the group name to 24 characters or fewer.');
+    return g;
+  }
   function checkDuration(sec) {
     assert(Number.isInteger(sec) && sec >= 1 && sec <= 86400, 'Time must be at least 1 second.');
   }
@@ -124,28 +131,74 @@
   /* ------------------------------------------------------------------ */
 
   const ACCENTS = ['green', 'blue', 'red', 'orange', 'yellow', 'graphite'];
+  /**
+   * Built-in groups (ids; the app shows them as Chest, Back, ...). Exercises can
+   * also use a custom group, stored as its own name, e.g. "Mobility".
+   */
   const MUSCLE_GROUPS = ['chest', 'back', 'shoulders', 'legs', 'arms', 'core', 'other'];
 
+  // [name, group, timed, id]. The id is kept when a preset is renamed, so history stays attached.
   const PRESET_EXERCISES = [
-    ['Bench Press', 'chest'], ['Incline Bench Press', 'chest'], ['Dumbbell Bench Press', 'chest'],
-    ['Incline Dumbbell Press', 'chest'], ['Cable Chest Fly', 'chest'], ['Dips', 'chest'], ['Push-up', 'chest'],
+    ['Bench Press', 'chest'], ['Incline Bench Press', 'chest'],
+    ['Dumbbell Chest Press', 'chest', false, 'ex_dumbbell-bench-press'],
+    ['Incline Dumbbell Press', 'chest'], ['Pec Deck Fly', 'chest', false, 'ex_cable-chest-fly'],
+    ['Dips', 'chest'], ['Push-up', 'chest'],
     ['Overhead Press', 'shoulders'], ['Dumbbell Shoulder Press', 'shoulders'], ['Lateral Raise', 'shoulders'],
-    ['Rear Delt Fly', 'shoulders'], ['Face Pull', 'shoulders'],
-    ['Deadlift', 'back'], ['Pull-up', 'back'], ['Chin-up', 'back'], ['Lat Pulldown', 'back'],
-    ['Barbell Row', 'back'], ['Dumbbell Row', 'back'], ['Seated Cable Row', 'back'], ['T-Bar Row', 'back'],
+    ['Rear Delt Fly', 'shoulders'],
+    ['Deadlift', 'back'], ['Pull-up', 'back'], ['Lat Pulldown', 'back'],
+    ['Dumbbell Row', 'back'], ['Seated Cable Row', 'back'], ['Chest-Supported Row', 'back', false, 'ex_t-bar-row'],
     ['Back Squat', 'legs'], ['Front Squat', 'legs'], ['Romanian Deadlift', 'legs'], ['Leg Press', 'legs'],
-    ['Bulgarian Split Squat', 'legs'], ['Walking Lunge', 'legs'], ['Leg Extension', 'legs'],
+    ['Bulgarian Split Squat', 'legs'], ['Leg Extension', 'legs'],
     ['Leg Curl', 'legs'], ['Hip Thrust', 'legs'], ['Standing Calf Raise', 'legs'],
     ['Barbell Curl', 'arms'], ['Dumbbell Curl', 'arms'], ['Hammer Curl', 'arms'],
     ['Triceps Pushdown', 'arms'], ['Skull Crusher', 'arms'], ['Overhead Triceps Extension', 'arms'],
-    ['Close-Grip Bench Press', 'arms'],
-    ['Hanging Leg Raise', 'core'], ['Cable Crunch', 'core'], ['Ab Wheel Rollout', 'core'],
+    ['Hanging Leg Raise', 'core'], ['Cable Crunch', 'core'],
     // Logged by time instead of reps
-    ['Plank', 'core', true], ['Side Plank', 'core', true], ['Hollow Hold', 'core', true],
+    ['Plank', 'core', true], ['Side Plank', 'core', true],
     ['Dead Hang', 'back', true], ['Wall Sit', 'legs', true],
-  ].map(([name, group, timed]) => ({
-    id: `ex_${slug(name)}`, name, group, custom: false, archived: false, timed: !!timed,
+  ].map(([name, group, timed, id]) => ({
+    id: id || `ex_${slug(name)}`, name, group, custom: false, archived: false, timed: !!timed,
   }));
+
+  /**
+   * One-time changes to the preset list for data saved by older versions.
+   * renamed: id -> [old name, new name] (only renamed if the user kept the old name).
+   * removed: ids taken out of the presets. Unused ones are deleted; ones with
+   * logged sets or in a split are hidden instead, so history is never lost.
+   */
+  const PRESET_MIGRATIONS = [
+    {
+      id: 'presets-2026-11-24',
+      renamed: {
+        'ex_dumbbell-bench-press': ['Dumbbell Bench Press', 'Dumbbell Chest Press'],
+        'ex_cable-chest-fly': ['Cable Chest Fly', 'Pec Deck Fly'],
+        'ex_t-bar-row': ['T-Bar Row', 'Chest-Supported Row'],
+      },
+      removed: ['ex_face-pull', 'ex_chin-up', 'ex_barbell-row', 'ex_walking-lunge',
+        'ex_close-grip-bench-press', 'ex_ab-wheel-rollout', 'ex_hollow-hold'],
+    },
+  ];
+
+  function runPresetMigrations(db) {
+    for (const m of PRESET_MIGRATIONS) {
+      if (db.migrations.includes(m.id)) continue;
+      for (const [id, [oldName, newName]] of Object.entries(m.renamed)) {
+        const ex = db.exercises.find((e) => e.id === id);
+        const clash = db.exercises.some((e) => e.id !== id && !e.archived && e.name.toLowerCase() === newName.toLowerCase());
+        if (ex && !ex.custom && ex.name === oldName && !clash) ex.name = newName;
+      }
+      const used = new Set();
+      for (const s of db.sessions) for (const set of s.sets || []) used.add(set.exerciseId);
+      for (const t of db.sessionTypes) for (const it of t.items || []) used.add(it.exerciseId);
+      for (const id of m.removed) {
+        const ex = db.exercises.find((e) => e.id === id);
+        if (!ex || ex.custom) continue;
+        if (used.has(id)) ex.archived = true;
+        else db.exercises = db.exercises.filter((e) => e.id !== id);
+      }
+      db.migrations.push(m.id);
+    }
+  }
 
   function defaultSettings() {
     return {
@@ -171,6 +224,7 @@
       sessions: [],
       milestones: [],
       bodyweights: [],
+      migrations: PRESET_MIGRATIONS.map((m) => m.id),   // a fresh install already has the current presets
     };
   }
 
@@ -189,7 +243,9 @@
       sessions: Array.isArray(db.sessions) ? db.sessions : [],
       milestones: Array.isArray(db.milestones) ? db.milestones : [],
       bodyweights: Array.isArray(db.bodyweights) ? db.bodyweights : [],
+      migrations: Array.isArray(db.migrations) ? db.migrations.slice() : [],
     };
+    runPresetMigrations(out);
     out.settings.restTimer = { ...base.settings.restTimer, ...(out.settings.restTimer || {}) };
     out.settings.schedule = {
       ...base.settings.schedule,
@@ -352,7 +408,7 @@
         assert(n, 'Give the exercise a name.');
         const clash = nameTaken(d, n);
         assert(!clash, `You already have an exercise called "${clash && clash.name}".`);
-        assert(MUSCLE_GROUPS.includes(group), 'Unknown muscle group.');
+        group = checkGroup(group);
         const ex = { id: newId('ex'), name: n, group, custom: true, archived: false, timed: !!timed };
         d.exercises.push(ex);
         return ex;
@@ -371,8 +427,7 @@
           ex.name = n;
         }
         if (group !== undefined) {
-          assert(MUSCLE_GROUPS.includes(group), 'Unknown muscle group.');
-          ex.group = group;
+          ex.group = checkGroup(group);
         }
         if (timed !== undefined) ex.timed = !!timed;
         return ex;

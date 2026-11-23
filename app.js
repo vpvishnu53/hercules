@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.14';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.15';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -150,6 +150,47 @@
     if (state.settings && state.settings.theme === 'system') withThemeTransition(applyTheme);
     else applyTheme();
   });
+
+  /* ------------------------------------------------------------------ */
+  /* On-screen keyboard                                                  */
+  /* The app is sized to the part of the screen the keyboard leaves free */
+  /* (the visual viewport), so the set-entry block and sheets sit right  */
+  /* above the keyboard, and the field being typed in is scrolled into   */
+  /* view. The tab bar is hidden while typing to give the field room.    */
+  /* ------------------------------------------------------------------ */
+
+  const isField = (el) => el && el.matches && el.matches('input:not([type=range]):not([type=checkbox]):not([type=file]), textarea, select, [contenteditable]');
+
+  function revealFocused() {
+    const el = document.activeElement;
+    if (!isField(el)) return;
+    // Inside the sticky entry block the block itself moves with the keyboard; elsewhere scroll to the field.
+    if (el.closest('.entry')) return;
+    el.scrollIntoView({ block: 'center', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  }
+
+  (function fitToKeyboard() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    let last = '';
+    const fit = () => {
+      const keyboard = Math.max(0, window.innerHeight - vv.height);
+      const open = keyboard > 120 && isField(document.activeElement);
+      const key = `${Math.round(vv.height)}|${Math.round(vv.offsetTop)}|${open}`;
+      if (key === last) return;
+      last = key;
+      root.style.setProperty('--vvh', `${vv.height}px`);
+      root.style.setProperty('--vvt', `${vv.offsetTop}px`);
+      document.body.classList.toggle('kb-open', open);
+      if (open) setTimeout(revealFocused, 60);
+    };
+    vv.addEventListener('resize', fit);
+    vv.addEventListener('scroll', fit);
+    document.addEventListener('focusin', () => setTimeout(() => { fit(); revealFocused(); }, 250));
+    document.addEventListener('focusout', () => setTimeout(fit, 250));
+    fit();
+  })();
 
   /* ------------------------------------------------------------------ */
   /* Toast                                                               */
@@ -432,6 +473,18 @@
     ev.preventDefault();
     const values = {};
     for (const el of form.elements) if (el.name) values[el.name] = el.value;
+    // Group picker: "+ New group" uses the typed name (a built-in group's name maps to it).
+    for (const key of Object.keys(values)) {
+      if (values[key] !== '__new' || !(`${key}__new` in values)) continue;
+      const typed = values[`${key}__new`].replace(/\s+/g, ' ').trim();
+      const builtIn = Object.keys(GROUP_NAMES).find((g) => GROUP_NAMES[g].toLowerCase() === typed.toLowerCase());
+      values[key] = builtIn || typed;
+      if (!values[key]) {
+        $('.form-error', form).textContent = 'Name the new group.';
+        $('.form-error', form).hidden = false;
+        return;
+      }
+    }
     const errorEl = $('.form-error', form);
     try {
       const result = sheet.onSubmit ? await sheet.onSubmit(values) : values;
@@ -456,12 +509,22 @@
   }
 
   /**
-   * Form sheet. fields: [{ name, label, type: 'text'|'select', value, options: [[value, label]], placeholder }]
+   * Form sheet. fields: [{ name, label, type: 'text'|'select'|'group', value, options: [[value, label]], placeholder }]
+   * type 'group' is the group picker: existing groups plus "+ New group", which
+   * shows a name box; the value comes back already resolved.
    * onSubmit(values) may throw to show an error and keep the sheet open.
    */
   function formSheet({ title, fields, submitLabel = 'Save', onSubmit }) {
     const fieldHtml = (f, i) => {
       const id = `sheet-${f.name}`;
+      if (f.type === 'group') {
+        return `<div class="field"><label for="${id}">${esc(f.label)}</label>
+          <span class="select-wrap"><select class="select" id="${id}" name="${esc(f.name)}" data-change="group-select">
+          ${groupOptions().map(([v, l]) => `<option value="${esc(v)}"${v === f.value ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+          <option value="__new">+ New group</option>
+          </select></span>
+          <input class="input" name="${esc(f.name)}__new" type="text" placeholder="Group name, like Mobility" maxlength="24" autocomplete="off" hidden></div>`;
+      }
       if (f.type === 'select') {
         return `<div class="field"><label for="${id}">${esc(f.label)}</label>
           <span class="select-wrap"><select class="select" id="${id}" name="${esc(f.name)}">
@@ -500,7 +563,22 @@
   }
   actions['sheet-choose'] = (el) => closeSheet(el.dataset.value);
 
-  const groupOptions = () => Store.MUSCLE_GROUPS.map((g) => [g, GROUP_NAMES[g]]);
+  /** Display name of a group: built-in ids get their label, custom groups are their own name. */
+  const groupName = (g) => GROUP_NAMES[g] || g;
+  /** Every group in use: built-in ones first (Other last), then custom ones A–Z. */
+  function allGroups() {
+    const builtIn = Store.MUSCLE_GROUPS.filter((g) => g !== 'other');
+    const custom = [...new Set(state.exercises.map((e) => e.group))]
+      .filter((g) => g && !Store.MUSCLE_GROUPS.includes(g))
+      .sort((a, b) => a.localeCompare(b));
+    return [...builtIn, ...custom, 'other'];
+  }
+  const groupOptions = () => allGroups().map((g) => [g, groupName(g)]);
+  changes['group-select'] = (el) => {
+    const box = el.closest('.field').querySelector('input[name$="__new"]');
+    box.hidden = el.value !== '__new';
+    if (!box.hidden) box.focus();
+  };
 
   /** Add-exercise sheet. Resolves the new exercise or null. */
   async function addExerciseSheet(name = '') {
@@ -509,7 +587,7 @@
       submitLabel: 'Add exercise',
       fields: [
         { name: 'name', label: 'Name', value: name, placeholder: 'e.g. Landmine Press' },
-        { name: 'group', label: 'Muscle group', type: 'select', value: 'other', options: groupOptions() },
+        { name: 'group', label: 'Group', type: 'group', value: 'other' },
         { name: 'timed', label: 'Log it by', type: 'select', value: '', options: [['', 'Reps'], ['1', 'Time (planks, hangs)']] },
       ],
       onSubmit: (v) => Store.addExercise({ name: v.name, group: v.group, timed: v.timed === '1' }),
@@ -524,7 +602,7 @@
    */
   function pickExercise({ title = 'Add exercise', exclude = [] } = {}) {
     const visible = state.exercises.filter((e) => !e.archived && !exclude.includes(e.id));
-    const groups = Store.MUSCLE_GROUPS
+    const groups = allGroups()
       .map((g) => [g, visible.filter((e) => e.group === g).sort((a, b) => a.name.localeCompare(b.name))])
       .filter(([, list]) => list.length);
     return new Promise((resolve) => {
@@ -538,7 +616,7 @@
         <div class="picker-list">
           ${groups.map(([g, list]) => `
             <section data-group>
-              <h3 class="picker-group-title">${GROUP_NAMES[g]}</h3>
+              <h3 class="picker-group-title">${esc(groupName(g))}</h3>
               ${list.map((e) => `<button class="picker-item" data-action="picker-pick" data-id="${esc(e.id)}" data-name="${esc(e.name.toLowerCase())}">${esc(e.name)}</button>`).join('')}
             </section>`).join('')}
         </div>
@@ -2496,10 +2574,10 @@
       </div>`;
     return `${head('Exercise library', { back: { href: '#settings', label: 'Settings' } })}
       <div class="actions-bar"><button class="btn btn-primary btn-block" data-action="ex-add">+ New exercise</button></div>
-      ${Store.MUSCLE_GROUPS.map((g) => {
+      ${allGroups().map((g) => {
         const list = shown.filter((e) => e.group === g).sort((a, b) => a.name.localeCompare(b.name));
         return list.length ? `<section class="group" style="margin-top:12px">
-          <h2 class="group-title">${GROUP_NAMES[g]}</h2><div class="list">${list.map(row).join('')}</div></section>` : '';
+          <h2 class="group-title">${esc(groupName(g))}</h2><div class="list">${list.map(row).join('')}</div></section>` : '';
       }).join('')}
       ${hidden.length ? `<section class="group">
         <h2 class="group-title">Hidden</h2><div class="list">${hidden.map(row).join('')}</div>
@@ -2516,7 +2594,7 @@
       title: 'Edit exercise',
       fields: [
         { name: 'name', label: 'Name', value: e.name },
-        { name: 'group', label: 'Muscle group', type: 'select', value: e.group, options: groupOptions() },
+        { name: 'group', label: 'Group', type: 'group', value: e.group },
         { name: 'timed', label: 'Log it by', type: 'select', value: e.timed ? '1' : '', options: [['', 'Reps'], ['1', 'Time (planks, hangs)']] },
       ],
       onSubmit: (v) => Store.updateExercise(e.id, { name: v.name, group: v.group, timed: v.timed === '1' }),

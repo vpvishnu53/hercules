@@ -189,6 +189,11 @@ body { overflow: hidden; }
   display: flex;
   flex-direction: column;
 }
+/* When the keyboard is up, the app shrinks to the space above it (set from JS). */
+body.kb-open #app { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); }
+body.kb-open .tabbar { display: none; }
+body.kb-open #sheet-root { top: var(--vvt, 0px); bottom: auto; height: var(--vvh, 100dvh); }
+body.kb-open .sheet { max-height: calc(var(--vvh, 100dvh) - 16px); }
 @media (min-width: 600px) {
   #app { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 }
