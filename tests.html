@@ -23,6 +23,8 @@
 <div id="out"></div>
 
 <script src="storage.js"></script>
+<script src="prs.js"></script>
+<script src="samples.js"></script>
 <script>
 /* ---------- Tiny test runner ---------- */
 const groups = [];
@@ -274,6 +276,234 @@ group('Storage', (test) => {
     const s = await Store.getSettings();
     eq([s.units, s.restTimer.durationSec, s.schedule.enabled], ['lb', 120, false]);
     ok((await Store.listExercises()).length >= 30);
+  });
+});
+
+/* ======================= PR (milestone) tests ======================= */
+
+/**
+ * Builds sessions from short strings, all for exercise "ex" unless prefixed.
+ *   S('2026-11-01', '100x5', 'BWx10', '-20x8', 'd60x10', 'other:50x5')
+ * 'BW' = bodyweight (null), 'd' prefix = drop set of the previous main set.
+ * Session ids are s1, s2, ... and set ids s1.1, s1.2, ... in the order given.
+ */
+const S = (date, ...sets) => ({ date, sets });
+function hist(...specs) {
+  return specs.map((spec, i) => {
+    const sid = `s${i + 1}`;
+    let lastMain = null;
+    const sets = spec.sets.map((str, j) => {
+      let ex = 'ex', body = str;
+      if (body.includes(':')) [ex, body] = body.split(':');
+      const drop = body.startsWith('d');
+      if (drop) body = body.slice(1);
+      const [w, r] = body.split('x');
+      const set = { id: `${sid}.${j + 1}`, kind: drop ? 'drop' : 'main', parentId: drop ? lastMain.id : null,
+        exerciseId: drop ? lastMain.exerciseId : ex, weightKg: w === 'BW' ? null : Number(w), reps: Number(r),
+        loggedAt: `${spec.date}T10:${String(j).padStart(2, '0')}:00Z` };
+      if (!drop) lastMain = set;
+      return set;
+    });
+    return { id: sid, date: spec.date, startedAt: spec.startedAt || `${spec.date}T10:00:00Z`, sets };
+  });
+}
+const prs = (sessions, ex = 'ex') => PRs.computeMilestones(sessions, ex).map((m) => `${m.setId}:${m.type}`);
+
+group('PR rules', (test) => {
+  test('first two sessions are baseline; the 3rd onward can set PRs', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', '105x5', '110x3'), S('2026-01-03', '100x5'),
+      S('2026-01-04', '112.5x1'));
+    eq(prs(h), ['s4.1:weight']);
+  });
+
+  test('baseline ignores how many sets the first two sessions had', () => {
+    const h = hist(S('2026-01-01', '50x5'), S('2026-01-02', '60x5', '70x5', '80x5', '90x5'), S('2026-01-03', '95x5'));
+    eq(prs(h), ['s3.1:weight']);
+  });
+
+  test('sessions without this exercise do not count toward the baseline', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', 'other:50x5'), S('2026-01-03', '110x5'));
+    eq(prs(h), []);
+  });
+
+  test('rep PR only at exactly the same weight, and needs an earlier set at it', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', '100x5'), S('2026-01-03', '100x6', '95x9'));
+    eq(prs(h), ['s3.1:reps']);
+  });
+
+  test('a new max weight gets only the weight PR, not a rep PR as well', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', '100x5'), S('2026-01-03', '102.5x8'));
+    eq(prs(h), ['s3.1:weight']);
+  });
+
+  test('earlier sets in the same session count (100×5 then 102.5×3 = two trophies)', () => {
+    const h = hist(S('2026-01-01', '95x5'), S('2026-01-02', '97.5x5'), S('2026-01-03', '100x5', '102.5x3'),
+      S('2026-01-04', '100x6', '100x7'));
+    eq(prs(h), ['s3.1:weight', 's3.2:weight', 's4.1:reps', 's4.2:reps']);
+  });
+
+  test('ties are not PRs', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', '100x5'), S('2026-01-03', '100x5', '100x5'));
+    eq(prs(h), []);
+  });
+
+  test('assisted and bodyweight: -20 beats -30, blank beats -20, +10 beats blank', () => {
+    const h = hist(S('2026-01-01', '-30x8'), S('2026-01-02', '-30x8'), S('2026-01-03', '-20x6', 'BWx3', '10x2'));
+    eq(prs(h), ['s3.1:weight', 's3.2:weight', 's3.3:weight']);
+    const m = PRs.computeMilestones(h, 'ex');
+    eq(m[1].weightKg, null, 'bodyweight PR keeps a blank weight');
+    eq(m[1].previous.weightKg, -20);
+  });
+
+  test('more reps at bodyweight is a rep PR', () => {
+    const h = hist(S('2026-01-01', 'BWx10'), S('2026-01-02', 'BWx10'), S('2026-01-03', 'BWx12', '0x13'));
+    eq(prs(h), ['s3.1:reps', 's3.2:reps'], 'blank and a typed 0 are the same weight');
+  });
+
+  test('drop sets never make PRs and never count as history', () => {
+    const h = hist(S('2026-01-01', '100x5', 'd120x10'), S('2026-01-02', '100x5'), S('2026-01-03', '110x3', 'd130x1'));
+    eq(prs(h), ['s3.1:weight']);
+    eq(PRs.computeMilestones(h, 'ex')[0].previous.weightKg, 100, 'the 120 drop was ignored');
+  });
+
+  test('0.01 kg tolerance: kg/lb rounding is not a PR, but a real increase is', () => {
+    const h = hist(S('2026-01-01', '102.058x5'), S('2026-01-02', '100x5'),
+      S('2026-01-03', '102.0582x5', '102.0582x6', '102.07x1'));
+    eq(prs(h), ['s3.2:reps', 's3.3:weight']);
+  });
+
+  test('sessions are ordered by date, not by when they were entered', () => {
+    const h = hist(S('2026-11-10', '110x1'), S('2026-11-01', '100x1'), S('2026-11-05', '100x1'));
+    eq(prs(h), ['s1.1:weight']);
+  });
+
+  test('two sessions on one day are ordered by start time', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', '100x5'),
+      { date: '2026-01-03', startedAt: '2026-01-03T19:00:00Z', sets: ['105x5'] },
+      { date: '2026-01-03', startedAt: '2026-01-03T08:00:00Z', sets: ['102.5x5'] });
+    eq(prs(h), ['s4.1:weight', 's3.1:weight']);
+  });
+
+  test('previous best is recorded on each milestone', () => {
+    const h = hist(S('2026-01-01', '100x5', '100x6'), S('2026-01-02', '90x8'), S('2026-01-03', '105x3', '90x9'));
+    const [w, r] = PRs.computeMilestones(h, 'ex');
+    eq(w.previous, { weightKg: 100, reps: 6 });
+    eq(r.previous, { weightKg: 90, reps: 8 });
+    eq([w.date, w.sessionId, w.exerciseId], ['2026-01-03', 's3', 'ex']);
+  });
+
+  test('editing a typo fixes the milestones (120 → 102); deleting re-evaluates later sets', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', '100x5'), S('2026-01-03', '120x5'), S('2026-01-04', '110x3'));
+    eq(prs(h), ['s3.1:weight'], 'typo makes 110 look like no PR');
+    h[2].sets[0].weightKg = 102;
+    eq(prs(h), ['s3.1:weight', 's4.1:weight'], 'after the fix, 110 is a PR');
+    h[2].sets = [];
+    eq(prs(h), ['s4.1:weight'], 'after deleting, session 4 becomes the 3rd and 110 still beats 100');
+  });
+
+  test('milestonesForSet returns only that set', () => {
+    const h = hist(S('2026-01-01', '100x5'), S('2026-01-02', '100x5'), S('2026-01-03', '105x5', '100x6'));
+    eq(PRs.milestonesForSet(h, 'ex', 's3.2').map((m) => m.type), ['reps']);
+    eq(PRs.milestonesForSet(h, 'ex', 's2.1'), []);
+  });
+});
+
+group('PR charts data', (test) => {
+  const h = hist(S('2026-01-01', '100x5', '100x6', '80x10'), S('2026-01-03', 'BWx10'),
+    S('2026-01-05', '102.0582x3', '102.058x4', 'd60x10'), S('2026-01-02', 'other:1x1'));
+
+  test('max weight per session, ties broken by reps', () => {
+    eq(PRs.maxWeightSeries(h, 'ex').map((p) => [p.date, p.weightKg, p.reps]),
+      [['2026-01-01', 100, 6], ['2026-01-03', null, 10], ['2026-01-05', 102.058, 4]]);
+  });
+
+  test('most reps per session at one weight', () => {
+    eq(PRs.repsAtWeightSeries(h, 'ex', 100).map((p) => [p.date, p.reps]), [['2026-01-01', 6]]);
+    eq(PRs.repsAtWeightSeries(h, 'ex', 102.06).map((p) => p.reps), [4], 'within tolerance');
+    eq(PRs.repsAtWeightSeries(h, 'ex', null).map((p) => p.reps), [10], 'bodyweight');
+  });
+
+  test('weights used, heaviest first, near-equal weights merged, drops ignored', () => {
+    eq(PRs.weightsUsed(h, 'ex').map((w) => [w.weightKg, w.sets]),
+      [[102.0582, 2], [100, 2], [80, 1], [null, 1]]);
+  });
+});
+
+group('Milestones through the store', (test) => {
+  test('log, edit, delete keep saved milestones in step', async () => {
+    await freshStore();
+    const ex = 'ex_bench-press';
+    const recompute = async () => {
+      const sessions = await Store.listSessions();
+      await Store.replaceExerciseMilestones(ex, PRs.computeMilestones(sessions, ex));
+      return (await Store.listMilestones({ exerciseId: ex })).map((m) => [m.type, m.weightKg]);
+    };
+    for (const [date, w] of [['2026-01-01', 100], ['2026-01-02', 100]]) {
+      const s = await Store.startSession({ date });
+      await Store.addSet(s.id, { exerciseId: ex, weightKg: w, reps: 5 });
+      await Store.finishSession(s.id);
+    }
+    const s3 = await Store.startSession({ date: '2026-01-03' });
+    const typo = await Store.addSet(s3.id, { exerciseId: ex, weightKg: 120, reps: 5 });
+    // Live logging: check just this set and save what it earned.
+    const live = PRs.milestonesForSet(await Store.listSessions(), ex, typo.id);
+    eq(live.map((m) => m.type), ['weight'], 'banner would show');
+    await Store.addMilestones(live);
+    const savedId = (await Store.listMilestones())[0].id;
+    await Store.addSet(s3.id, { exerciseId: ex, weightKg: 110, reps: 3 });
+    eq(await recompute(), [['weight', 120]]);
+    await Store.updateSet(s3.id, typo.id, { weightKg: 102 });
+    eq(await recompute(), [['weight', 102], ['weight', 110]]);
+    eq((await Store.listMilestones())[0].id, savedId, 'same set keeps its milestone id');
+    await Store.deleteSet(s3.id, typo.id);
+    eq(await recompute(), [['weight', 110]]);
+  });
+});
+
+group('Sample data', (test) => {
+  const today = new Date(2026, 10, 23);
+
+  test('builds, imports, and is the same every time', async () => {
+    await freshStore();
+    await Store.updateSettings({ units: 'lb' });
+    const base = await Store.exportData();
+    const a = SampleData.build({ base, today });
+    const b = SampleData.build({ base, today });
+    eq(JSON.stringify(a.sessions), JSON.stringify(b.sessions), 'deterministic');
+    await Store.importData(a);
+    eq((await Store.getSettings()).units, 'lb', 'kept the user settings');
+    const sessions = await Store.listSessions();
+    ok(sessions.length >= 25, `has ${sessions.length} sessions`);
+    ok(sessions.every((s) => s.finishedAt), 'all finished, nothing left open');
+    ok(sessions.every((s) => s.date < '2026-11-23'), 'all before today');
+    eq((await Store.listSessionTypes()).map((t) => t.name), ['Push', 'Pull', 'Legs']);
+  });
+
+  test('covers the tricky cases', async () => {
+    const sessions = await Store.listSessions();
+    const all = sessions.flatMap((s) => s.sets);
+    ok(all.some((s) => s.kind === 'drop'), 'drop sets');
+    ok(all.some((s) => s.weightKg === null), 'bodyweight sets');
+    ok(all.some((s) => s.weightKg < 0), 'assisted sets');
+    const days = sessions.map((s) => s.date);
+    ok(days.some((d, i) => days.indexOf(d) !== i), 'two sessions on one day');
+    ok((await Store.listBodyweights()).length >= 6, 'weigh-ins');
+  });
+
+  test('saved milestones follow the rules', async () => {
+    const sessions = await Store.listSessions();
+    const saved = await Store.listMilestones();
+    ok(saved.length >= 10, `${saved.length} milestones`);
+    ok(saved.some((m) => m.type === 'weight') && saved.some((m) => m.type === 'reps'), 'both kinds');
+    const strip = (list) => list.map(({ setId, type }) => `${setId}:${type}`).sort();
+    eq(strip(saved), strip(PRs.computeAllMilestones(sessions)), 'saved = recomputed');
+    const setById = new Map(sessions.flatMap((s) => s.sets.map((x) => [x.id, x])));
+    ok(saved.every((m) => setById.get(m.setId).kind === 'main'), 'never on a drop set');
+    for (const m of saved) {
+      const before = sessions.filter((s) => (s.date < m.date || (s.date === m.date && s.id !== m.sessionId && s.startedAt < sessions.find((x) => x.id === m.sessionId).startedAt))
+        && s.sets.some((x) => x.kind === 'main' && x.exerciseId === m.exerciseId));
+      ok(before.length >= 2, `milestone on ${m.date} has a 2-session baseline`);
+    }
   });
 });
 
