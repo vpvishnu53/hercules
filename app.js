@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.3';
+  const APP_VERSION = '0.4';
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -281,7 +281,7 @@
           </select></span></div>`;
       }
       return `<div class="field"><label for="${id}">${esc(f.label)}</label>
-        <input class="input" id="${id}" name="${esc(f.name)}" type="text" value="${esc(f.value || '')}"
+        <input class="input${f.num ? ' num' : ''}" id="${id}" name="${esc(f.name)}" type="text" inputmode="${f.inputmode || 'text'}" value="${esc(f.value == null ? '' : f.value)}"
           placeholder="${esc(f.placeholder || '')}" autocomplete="off" ${i === 0 ? 'autofocus' : ''}></div>`;
     };
     return new Promise((resolve) => {
@@ -297,6 +297,20 @@
         </form>`, { resolve, onSubmit, label: title });
     });
   }
+
+  /** List of choices. options: [[value, label, danger?]]. Resolves the value or null. */
+  function choiceSheet({ title, options }) {
+    return new Promise((resolve) => {
+      openSheet(`
+        <h2 class="sheet-title">${esc(title)}</h2>
+        <div class="list" style="margin:8px -16px 12px">
+          ${options.map(([v, l, danger]) => `<button class="row" data-action="sheet-choose" data-value="${esc(v)}"${danger ? ' style="color:var(--danger)"' : ''}><span class="row-label">${esc(l)}</span></button>`).join('')}
+        </div>
+        <button class="btn btn-secondary btn-block" data-action="sheet-cancel">Cancel</button>`,
+      { resolve, label: title });
+    });
+  }
+  actions['sheet-choose'] = (el) => closeSheet(el.dataset.value);
 
   const groupOptions = () => Store.MUSCLE_GROUPS.map((g) => [g, GROUP_NAMES[g]]);
 
@@ -398,12 +412,746 @@
   /* ---------- Log, Calendar, PRs: placeholders until their stages ---------- */
 
   screens.log = {
-    async render() {
-      return `${head('Log')}
-        <div class="placeholder"><strong>The workout screen comes in stage 4.</strong>
-        <span>Set up your split, units and timer in Settings meanwhile.</span></div>`;
+    async render(parts) {
+      if (parts[0] === 'done' && parts[1]) return renderFinished(parts[1]);
+      const session = await Store.getActiveSession();
+      if (!session) return renderStart();
+      return renderWorkout(session);
     },
   };
+
+  /* ================================================================== */
+  /* Log tab                                                             */
+  /* ================================================================== */
+
+  const TROPHY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4 1.5h8V5a4 4 0 0 1-3 3.87V11h2.5v1.5h-7V11H7V8.87A4 4 0 0 1 4 5V1.5zM1.5 2.5H3V5c0 .2 0 .4.03.6A2.5 2.5 0 0 1 1.5 3.3v-.8zm11.5 0h1.5v.8a2.5 2.5 0 0 1-1.53 2.3c.02-.2.03-.4.03-.6V2.5zM4 13.5h8V15H4z"/></svg>';
+
+  Object.assign(state, {
+    entry: null,            // the set being entered: { sessionId, exerciseId, units, weightText, exactKg, reps, rpe, note, showNote }
+    dropDraft: null,        // inline drop-set row: { parentId, weightText, reps }
+    nextDismissed: {},      // "sessionId|exerciseId" -> true
+    startPick: null,        // session type chosen on the start screen (null = Freestyle)
+    busy: false,
+  });
+
+  const todayKey = () => Store.util.dateKey();
+  function prettyDate(key, long = false) {
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, long
+      ? { weekday: 'long', day: 'numeric', month: 'long' }
+      : { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+  const typeName = (id) => (state.sessionTypes.find((t) => t.id === id) || {}).name;
+  const sessionLabel = (s) => typeName(s.sessionTypeId) || 'Freestyle';
+  const mainSets = (session, exId) => session.sets.filter((s) => s.kind === 'main' && (!exId || s.exerciseId === exId));
+  const dropsOf = (session, parentId) => session.sets.filter((s) => s.parentId === parentId);
+
+  /** Weight as typed into a field: plain minus, no unit, blank for bodyweight. */
+  const inputText = (kg) => (kg == null ? '' : String(Units.display(kg)));
+  const weightHtml = (kg) => (kg == null ? 'BW' : `${Units.format(kg)}<small>${Units.unit}</small>`);
+  const weightPlain = (kg) => (kg == null ? 'Bodyweight' : `${Units.format(kg)} ${Units.unit}`);
+
+  /** "80 × 8, 8, 7" when the weight is the same, else "80 × 8, 82.5 × 6". */
+  function setsSummary(sets) {
+    if (!sets.length) return '';
+    const w0 = sets[0].weightKg == null ? 0 : sets[0].weightKg;
+    const same = sets.every((s) => Math.abs((s.weightKg == null ? 0 : s.weightKg) - w0) <= PRs.TOLERANCE_KG);
+    if (same) return `${Units.format(sets[0].weightKg)} × ${sets.map((s) => s.reps).join(', ')}`;
+    return sets.map((s) => `${Units.format(s.weightKg)} × ${s.reps}`).join(', ');
+  }
+
+  /** The most recent earlier session with main sets of this exercise. */
+  function previousSessionWith(sessions, session, exId) {
+    const before = (s) => s.date < session.date || (s.date === session.date && (s.startedAt || '') < (session.startedAt || ''));
+    const list = sessions.filter((s) => s.id !== session.id && before(s) && mainSets(s, exId).length);
+    return list[list.length - 1] || null;
+  }
+
+  /**
+   * Pre-fill: the previous set of this exercise today, or else the first set
+   * of last session, so a repeat set is one tap.
+   */
+  function ensureEntry(session, sessions, exId) {
+    const e = state.entry;
+    if (e && e.sessionId === session.id && e.exerciseId === exId && e.units === Units.unit) return e;
+    const here = mainSets(session, exId);
+    let src = here[here.length - 1];
+    if (!src) {
+      const prev = previousSessionWith(sessions, session, exId);
+      if (prev) src = mainSets(prev, exId)[0];
+    }
+    state.entry = {
+      sessionId: session.id,
+      exerciseId: exId,
+      units: Units.unit,
+      exactKg: src ? src.weightKg : undefined,
+      weightText: src ? inputText(src.weightKg) : '',
+      reps: src ? src.reps : 8,
+      rpe: src && src.rpe != null ? src.rpe : 8,
+      note: '',
+      showNote: false,
+    };
+    return state.entry;
+  }
+
+  /**
+   * kg for the typed weight. If the field still shows the pre-filled value,
+   * the exact stored kg is reused, so kg↔lb rounding never creates a false PR.
+   */
+  function entryKg(text, exactKg) {
+    if (exactKg !== undefined && String(text).trim() === inputText(exactKg)) return { kg: exactKg };
+    return Units.parse(text);
+  }
+
+  async function recomputeMilestones(exerciseIds) {
+    const sessions = await Store.listSessions();
+    for (const id of new Set(exerciseIds)) {
+      await Store.replaceExerciseMilestones(id, PRs.computeMilestones(sessions, id));
+    }
+  }
+
+  function clockText(session) {
+    if (session.date !== todayKey()) return `Started ${prettyDate(session.date)}`;
+    const sec = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = String(sec % 60).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+  }
+  setInterval(() => {
+    const el = $('[data-clock]');
+    if (el && state.activeSession) el.textContent = clockText(state.activeSession);
+  }, 1000);
+
+  /* ---------- Start screen ---------- */
+
+  async function renderStart() {
+    state.activeSession = null;
+    const s = state.settings;
+    const types = state.sessionTypes;
+    const sessions = await Store.listSessions();
+    const last = sessions.filter((x) => x.finishedAt).pop();
+    const dayId = s.schedule.enabled ? s.schedule.days[new Date().getDay()] : undefined;
+    const todayType = dayId ? types.find((t) => t.id === dayId) : null;
+    if (state.startPick && !types.some((t) => t.id === state.startPick)) state.startPick = null;
+    const setsIn = (t) => t.items.reduce((n, i) => n + i.targetSets, 0);
+    const weekday = new Date().toLocaleDateString(undefined, { weekday: 'long' });
+
+    let top = '';
+    if (s.schedule.enabled && todayType) {
+      top = `<div class="today-card">
+        <span class="when">Today · ${esc(weekday)}</span>
+        <span class="what">${esc(todayType.name)}</span>
+        <span class="detail">${plural(todayType.items.length, 'exercise')} · ${plural(setsIn(todayType), 'set')}</span>
+        <button class="btn btn-primary btn-xl btn-block" data-action="start" data-type="${esc(todayType.id)}">Start ${esc(todayType.name)}</button>
+      </div>`;
+    } else if (s.schedule.enabled) {
+      top = `<div class="today-card"><span class="when">Today · ${esc(weekday)}</span>
+        <span class="what">Rest day</span><span class="detail">Training anyway? Pick a session below.</span></div>`;
+    }
+    const chipTypes = todayType ? types.filter((t) => t.id !== todayType.id) : types;
+
+    return `${head('Log')}
+      ${top}
+      <section class="group" style="margin-top:${top ? 8 : 20}px">
+        <h2 class="group-title">${todayType ? 'Or start something else' : 'Session (optional)'}</h2>
+        <div class="chips" role="group">
+          ${chipTypes.map((t) => `<button class="chip" data-action="start-pick" data-type="${esc(t.id)}" aria-pressed="${state.startPick === t.id}">${esc(t.name)}</button>`).join('')}
+          <button class="chip" data-action="start-pick" data-type="" aria-pressed="${!state.startPick}">Freestyle</button>
+        </div>
+        ${types.length ? '' : '<p class="group-note">Set up session types like Push or Legs in Settings to get exercise suggestions. Freestyle works without one.</p>'}
+      </section>
+      ${last ? `<p class="last-row">Last workout: <b>${esc(sessionLabel(last))}</b> · ${esc(prettyDate(last.date))} · ${plural(mainSets(last).length, 'set')}</p>` : ''}
+      <div class="start-bar">
+        <button class="btn btn-${todayType ? 'secondary' : 'primary'} btn-xl btn-block" data-action="start-go">
+          Start ${esc(state.startPick ? typeName(state.startPick) : 'freestyle')} workout</button>
+      </div>`;
+  }
+
+  actions['start-pick'] = (el) => { state.startPick = el.dataset.type || null; return render({ keepScroll: true }); };
+  actions['start-go'] = () => startWorkout(state.startPick);
+  actions.start = (el) => startWorkout(el.dataset.type || null);
+
+  async function startWorkout(sessionTypeId) {
+    await Store.startSession({ sessionTypeId });
+    Object.assign(state, { entry: null, dropDraft: null, startPick: null });
+    await render();
+  }
+
+  /* ---------- Workout screen ---------- */
+
+  async function renderWorkout(session) {
+    state.activeSession = session;
+    const sessions = await Store.listSessions();
+    const prBySet = {};
+    for (const m of await Store.listMilestones()) {
+      if (m.sessionId === session.id) (prBySet[m.setId] = prBySet[m.setId] || []).push(m.type);
+    }
+    const cur = session.currentExerciseId;
+    const st = state.sessionTypes.find((t) => t.id === session.sessionTypeId);
+    const splitItem = st && cur ? st.items.find((i) => i.exerciseId === cur) : null;
+    const curMain = cur ? mainSets(session, cur) : [];
+    const strip = session.exerciseOrder.filter((id) => id === cur || mainSets(session, id).length);
+
+    const top = `<header class="w-top">
+        <span class="sess">${esc(sessionLabel(session))}</span>
+        <span class="clock num" data-clock>${esc(clockText(session))}</span>
+        <span class="grow"></span>
+        <button class="btn-out" data-action="w-add-ex">+ Exercise</button>
+        <button class="finish" data-action="w-finish">Finish</button>
+      </header>`;
+
+    const notice = session.date !== todayKey() ? `<div class="notice">
+        <span>This workout started on <b>${esc(prettyDate(session.date, true))}</b> and will be saved to that day.</span>
+        <button class="text-btn" data-action="move-today">Move it to today instead</button>
+      </div>` : '';
+
+    const stripHtml = strip.length > 1 ? `<nav class="ex-strip" aria-label="Exercises this session">
+        ${strip.map((id) => `<button class="ex-chip" data-action="ex-switch" data-id="${esc(id)}" aria-current="${id === cur}">
+          ${esc(exerciseName(id))}<span class="n">${mainSets(session, id).length}</span></button>`).join('')}
+      </nav>` : '';
+
+    if (!cur) {
+      return `${top}${notice}<div class="no-ex"><strong>Pick your first exercise</strong>
+        <span>Search the library or create a new one.</span>
+        <button class="btn btn-primary btn-xl" data-action="w-add-ex">+ Exercise</button></div>`;
+    }
+
+    const e = ensureEntry(session, sessions, cur);
+    const prev = previousSessionWith(sessions, session, cur);
+    const lastTime = prev
+      ? `Last time: <b>${esc(setsSummary(mainSets(prev, cur)))}</b> · ${esc(prettyDate(prev.date))}`
+      : 'First time logging this exercise';
+    const count = splitItem
+      ? `${curMain.length}<small> / ${plural(splitItem.targetSets, 'set')}</small>`
+      : `${curMain.length}<small> ${curMain.length === 1 ? 'set' : 'sets'}</small>`;
+
+    const setsHtml = curMain.map((set, i) => {
+      const drops = dropsOf(session, set.id);
+      const pr = prBySet[set.id];
+      const dd = state.dropDraft && state.dropDraft.parentId === set.id ? state.dropDraft : null;
+      return `<div class="grp">
+        <div class="set-row">
+          <span class="n">${i + 1}</span>
+          <span class="w">${weightHtml(set.weightKg)}</span><span class="x">×</span><span class="r">${set.reps}</span>
+          <span class="rpe">${set.rpe != null ? `RPE ${set.rpe}` : ''}</span>
+          <span>${pr ? `<span class="pr-badge" title="${pr.includes('weight') ? 'Weight PR' : 'Rep PR'}">${TROPHY}PR</span>` : ''}</span>
+          <button class="row-menu" data-action="set-menu" data-id="${esc(set.id)}" data-n="${i + 1}" aria-label="Set ${i + 1} options">⋯</button>
+        </div>
+        ${set.note ? `<div class="set-note">${esc(set.note)}</div>` : ''}
+        ${drops.map((d) => `<div class="drop-row">
+          <span class="arrow">↳</span><span class="w">${weightHtml(d.weightKg)}</span><span class="x">×</span><span class="r">${d.reps}</span>
+          <span class="tag-d">drop</span><span></span>
+          <button class="row-menu" data-action="set-menu" data-id="${esc(d.id)}" aria-label="Drop set options">⋯</button></div>`).join('')}
+        ${dd ? `<div class="drop-edit">
+            <label class="visually-hidden" for="drop-w">Drop weight</label>
+            <input class="input" id="drop-w" type="text" inputmode="decimal" autocomplete="off" value="${esc(dd.weightText)}" placeholder="BW" data-input="drop-w">
+            <span class="unit">${Units.unit}</span>
+            <div class="stepper-sm" aria-label="Drop reps">
+              <button data-action="drop-reps" data-step="-1" aria-label="One fewer rep">−</button>
+              <output class="num" id="drop-r">${dd.reps}</output>
+              <button data-action="drop-reps" data-step="1" aria-label="One more rep">+</button>
+            </div>
+            <button class="btn btn-primary btn-sm" data-action="drop-save">Add drop</button>
+            <button class="icon-btn" data-action="drop-cancel" aria-label="Cancel drop set">${ICON.x}</button>
+          </div>`
+          : `<div class="drop-add"><button data-action="drop-open" data-id="${esc(set.id)}">+ Drop</button></div>`}
+      </div>`;
+    }).join('');
+
+    // Next exercise card: target reached and something in the split is still undone.
+    let nextHtml = '';
+    if (splitItem && curMain.length >= splitItem.targetSets && !state.nextDismissed[`${session.id}|${cur}`]) {
+      const next = st.items.find((i) => i.exerciseId !== cur && !mainSets(session, i.exerciseId).length);
+      if (next) {
+        nextHtml = `<div class="next-card">
+          <div class="t">Next: <b>${esc(exerciseName(next.exerciseId))}</b> <span>· ${plural(next.targetSets, 'set')}</span></div>
+          <button class="keep" data-action="next-keep" data-id="${esc(next.exerciseId)}">Keep</button>
+          <button class="icon-btn" data-action="next-dismiss" aria-label="Hide suggestion">${ICON.x}</button>
+        </div>`;
+      }
+    }
+
+    const rpe = state.settings.rpeEnabled ? `
+      <div>
+        <div class="rpe-row">
+          <label for="rpe-in">RPE</label>
+          <input id="rpe-in" type="range" min="6" max="10" step="0.5" value="${e.rpe}" data-input="rpe-in">
+          <output class="num" id="rpe-out" for="rpe-in">${e.rpe}</output>
+        </div>
+        <div class="rpe-ticks"><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+      </div>` : '';
+
+    return `${top}${notice}${stripHtml}
+      <div class="ex-head">
+        <div class="row1"><h2>${esc(exerciseName(cur))}</h2><span class="count">${count}</span></div>
+        <div class="last">${lastTime}</div>
+      </div>
+      ${curMain.length ? `<div class="sets">${setsHtml}</div>` : ''}
+      ${nextHtml}
+      <div class="entry">
+        <div data-rest-slot>${restRowHtml()}</div>
+        <div class="fields">
+          <div>
+            <label class="lab" for="w-in">Weight <em>blank = BW</em></label>
+            <div class="w-input">
+              <input id="w-in" type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="${esc(e.weightText)}" placeholder="BW" data-input="w-in">
+              <span class="unit">${Units.unit}</span>
+              <button class="sign" data-action="w-sign" aria-label="Switch between added weight and assistance">±</button>
+            </div>
+          </div>
+          <div>
+            <span class="lab">Reps</span>
+            <div class="reps">
+              <button data-action="reps-step" data-step="-1" aria-label="One fewer rep">−</button>
+              <output id="reps-out" aria-live="polite">${e.reps}</output>
+              <button data-action="reps-step" data-step="1" aria-label="One more rep">+</button>
+            </div>
+          </div>
+        </div>
+        ${rpe}
+        <div class="note-row">${e.showNote
+          ? `<label class="visually-hidden" for="note-in">Note for this set</label>
+             <input class="input" id="note-in" type="text" autocomplete="off" placeholder="Note for this set" value="${esc(e.note)}" data-input="note-in">`
+          : '<button class="text-btn" data-action="note-open">+ note</button>'}</div>
+        <button class="log-btn" data-action="log-set">Log set ${curMain.length + 1}</button>
+      </div>`;
+  }
+
+  /* ---------- Entry controls ---------- */
+
+  inputs['w-in'] = (el) => { state.entry.weightText = el.value; };
+  inputs['note-in'] = (el) => { state.entry.note = el.value; };
+  inputs['rpe-in'] = (el) => { state.entry.rpe = Number(el.value); $('#rpe-out').textContent = el.value; };
+  actions['reps-step'] = (el) => {
+    const e = state.entry;
+    e.reps = Math.min(999, Math.max(1, e.reps + Number(el.dataset.step)));
+    $('#reps-out').textContent = e.reps;
+  };
+  actions['w-sign'] = () => {
+    const e = state.entry;
+    const t = e.weightText.trim();
+    if (!t || t === '0') return;
+    e.weightText = t.startsWith('-') ? t.slice(1) : `-${t}`;
+    $('#w-in').value = e.weightText;
+  };
+  actions['note-open'] = async () => {
+    state.entry.showNote = true;
+    await render({ keepScroll: true });
+    const n = $('#note-in');
+    if (n) n.focus();
+  };
+
+  actions['log-set'] = async () => {
+    if (state.busy) return;
+    state.busy = true;
+    try {
+      const session = await Store.getActiveSession();
+      const e = state.entry;
+      const w = entryKg(e.weightText, e.exactKg);
+      if (w.error) throw new Error(w.error);
+      const set = await Store.addSet(session.id, {
+        exerciseId: e.exerciseId,
+        weightKg: w.kg,
+        reps: e.reps,
+        rpe: state.settings.rpeEnabled ? e.rpe : null,
+        note: e.showNote ? e.note : '',
+      });
+      const found = PRs.milestonesForSet(await Store.listSessions(), set.exerciseId, set.id);
+      if (found.length) {
+        await Store.addMilestones(found);
+        showPrBanner(found[0]);
+      } else if (navigator.vibrate) {
+        navigator.vibrate(15);
+      }
+      Object.assign(e, { exactKg: set.weightKg, weightText: inputText(set.weightKg), note: '', showNote: false });
+      const rt = state.settings.restTimer;
+      if (rt.enabled && rt.autoStart) timerStart(rt.durationSec);
+      else if (timer.done) timerStop();
+      await render({ keepScroll: true });
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    } finally {
+      state.busy = false;
+    }
+  };
+
+  /* ---------- Exercises in the session ---------- */
+
+  async function setCurrentExercise(id) {
+    const session = await Store.getActiveSession();
+    await Store.updateSession(session.id, { currentExerciseId: id });
+    state.dropDraft = null;
+    await render();
+  }
+  actions['ex-switch'] = (el) => setCurrentExercise(el.dataset.id);
+  actions['next-keep'] = (el) => setCurrentExercise(el.dataset.id);
+  actions['next-dismiss'] = async () => {
+    const s = state.activeSession;
+    state.nextDismissed[`${s.id}|${s.currentExerciseId}`] = true;
+    await render({ keepScroll: true });
+  };
+  actions['w-add-ex'] = async () => {
+    const id = await pickExercise({ title: 'Add exercise' });
+    if (id) await setCurrentExercise(id);
+  };
+  actions['move-today'] = async () => {
+    const s = await Store.getActiveSession();
+    await Store.updateSession(s.id, { date: todayKey() });
+    await recomputeMilestones(s.sets.map((x) => x.exerciseId));
+    await render({ keepScroll: true });
+    toast('Moved to today');
+  };
+
+  /* ---------- Edit / delete sets ---------- */
+
+  actions['set-menu'] = async (el) => {
+    const session = await Store.getActiveSession();
+    const set = session.sets.find((x) => x.id === el.dataset.id);
+    if (!set) return;
+    const label = `${set.kind === 'drop' ? 'Drop set' : `Set ${el.dataset.n}`} · ${weightPlain(set.weightKg)} × ${set.reps}`;
+    const choice = await choiceSheet({ title: label, options: [['edit', 'Edit'], ['delete', 'Delete', true]] });
+    if (choice === 'edit') await editSet(session, set);
+    if (choice === 'delete') await deleteSet(session, set);
+  };
+
+  async function editSet(session, set) {
+    const isMain = set.kind === 'main';
+    const rpeOptions = [['', 'None'], ...[6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((v) => [String(v), String(v)])];
+    const fields = [
+      { name: 'weight', label: `Weight (${Units.unit}, blank = bodyweight)`, value: inputText(set.weightKg), inputmode: 'decimal', num: true },
+      { name: 'reps', label: 'Reps', value: String(set.reps), inputmode: 'numeric', num: true },
+    ];
+    if (isMain && (state.settings.rpeEnabled || set.rpe != null)) {
+      fields.push({ name: 'rpe', label: 'RPE', type: 'select', value: set.rpe == null ? '' : String(set.rpe), options: rpeOptions });
+    }
+    if (isMain) fields.push({ name: 'note', label: 'Note', value: set.note });
+    const done = await formSheet({
+      title: isMain ? 'Edit set' : 'Edit drop set',
+      fields,
+      onSubmit: async (v) => {
+        const w = entryKg(v.weight, set.weightKg);
+        if (w.error) throw new Error(w.error);
+        const reps = Number(v.reps);
+        if (!Number.isInteger(reps) || reps < 1) throw new Error('Reps must be a whole number of 1 or more.');
+        const patch = { weightKg: w.kg, reps };
+        if ('rpe' in v) patch.rpe = v.rpe === '' ? null : Number(v.rpe);
+        if ('note' in v) patch.note = v.note;
+        return Store.updateSet(session.id, set.id, patch);
+      },
+    });
+    if (!done) return;
+    await recomputeMilestones([set.exerciseId]);
+    await render({ keepScroll: true });
+    toast('Set updated');
+  }
+
+  async function deleteSet(session, set) {
+    const drops = set.kind === 'main' ? dropsOf(session, set.id).length : 0;
+    const ok = await confirmSheet({
+      title: set.kind === 'drop' ? 'Delete this drop set?' : 'Delete this set?',
+      body: drops ? `Its ${plural(drops, 'drop set')} will be deleted too.` : '',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    await Store.deleteSet(session.id, set.id);
+    if (state.dropDraft && state.dropDraft.parentId === set.id) state.dropDraft = null;
+    await recomputeMilestones([set.exerciseId]);
+    await render({ keepScroll: true });
+    toast('Set deleted');
+  }
+
+  /* ---------- Drop sets ---------- */
+
+  actions['drop-open'] = async (el) => {
+    const session = await Store.getActiveSession();
+    const parent = session.sets.find((x) => x.id === el.dataset.id);
+    const drops = dropsOf(session, parent.id);
+    const base = drops.length ? drops[drops.length - 1] : parent;
+    let text = '';
+    if (base.weightKg != null && base.weightKg > 0) {
+      const step = Units.unit === 'lb' ? 5 : 2.5;
+      const v = Math.round((Units.display(base.weightKg) * 0.8) / step) * step;
+      text = v > 0 ? String(v) : '';
+    }
+    state.dropDraft = { parentId: parent.id, weightText: text, reps: base.reps };
+    await render({ keepScroll: true });
+  };
+  inputs['drop-w'] = (el) => { state.dropDraft.weightText = el.value; };
+  actions['drop-reps'] = (el) => {
+    const d = state.dropDraft;
+    d.reps = Math.min(999, Math.max(1, d.reps + Number(el.dataset.step)));
+    $('#drop-r').textContent = d.reps;
+  };
+  actions['drop-cancel'] = () => { state.dropDraft = null; return render({ keepScroll: true }); };
+  actions['drop-save'] = async () => {
+    const d = state.dropDraft;
+    const w = Units.parse(d.weightText);
+    if (w.error) throw new Error(w.error);
+    const session = await Store.getActiveSession();
+    await Store.addSet(session.id, { parentId: d.parentId, weightKg: w.kg, reps: d.reps });
+    state.dropDraft = null;
+    const rt = state.settings.restTimer;
+    if (rt.enabled && rt.autoStart) timerStart(rt.durationSec);
+    await render({ keepScroll: true });
+  };
+
+  /* ---------- PR banner ---------- */
+
+  let prTimer = null;
+  function showPrBanner(m) {
+    const name = exerciseName(m.exerciseId);
+    const title = m.type === 'weight' ? `Weight PR · ${name}` : `Rep PR · ${name}`;
+    const prevText = m.type === 'weight'
+      ? `Heaviest before: ${weightPlain(m.previous.weightKg)}`
+      : `Best before: ${plural(m.previous.reps, 'rep')} at ${weightPlain(m.previous.weightKg)}`;
+    $('#pr-banner').innerHTML = `<button class="pr-pop" data-action="pr-dismiss">${TROPHY}
+      <span class="t"><b>${esc(title)}</b><span class="num">${esc(weightPlain(m.weightKg))} × ${m.reps} · ${esc(prevText)}</span></span></button>`;
+    if (navigator.vibrate) navigator.vibrate([60, 60, 120]);
+    clearTimeout(prTimer);
+    prTimer = setTimeout(() => { $('#pr-banner').innerHTML = ''; }, 5000);
+  }
+  actions['pr-dismiss'] = () => { clearTimeout(prTimer); $('#pr-banner').innerHTML = ''; };
+
+  /* ---------- Rest timer ---------- */
+
+  const timer = { running: false, done: false, startAt: 0, endAt: 0, total: 0, interval: null, wake: null, overlay: false };
+
+  /** Analog rest dial. Seconds hand sweeps once a minute; the arc shows rest left. */
+  function dialSvg(cls) {
+    const parts = [];
+    for (let i = 0; i < 60; i++) {
+      const a = (i * 6 * Math.PI) / 180;
+      const major = i % 5 === 0;
+      const r1 = 88;
+      const r2 = major ? 79 : 84;
+      const f = (n) => n.toFixed(2);
+      parts.push(`<line class="tick${major ? ' major' : ''}" x1="${f(100 + r1 * Math.sin(a))}" y1="${f(100 - r1 * Math.cos(a))}" x2="${f(100 + r2 * Math.sin(a))}" y2="${f(100 - r2 * Math.cos(a))}"/>`);
+    }
+    for (let n = 0; n < 60; n += 10) {
+      const a = (n * 6 * Math.PI) / 180;
+      parts.push(`<text class="numeral" x="${(100 + 68 * Math.sin(a)).toFixed(1)}" y="${(100 - 68 * Math.cos(a)).toFixed(1)}">${n}</text>`);
+    }
+    return `<svg class="dial ${cls}" viewBox="0 0 200 200" aria-hidden="true" data-dial>
+      <circle class="face" cx="100" cy="100" r="99"/>
+      <circle class="track" cx="100" cy="100" r="94"/>
+      <circle class="arc" cx="100" cy="100" r="94" pathLength="100" stroke-dasharray="100 100" transform="rotate(-90 100 100)" data-arc/>
+      ${parts.join('')}
+      <text class="readout" x="100" y="128" data-readout></text>
+      <text class="caption" x="100" y="152">rest left</text>
+      <g data-hand><line class="hand" x1="100" y1="114" x2="100" y2="16"/></g>
+      <rect class="hub" x="95" y="95" width="10" height="10"/>
+      <rect class="hub-in" x="98.5" y="98.5" width="3" height="3"/>
+    </svg>`;
+  }
+
+  const timerLeft = () => Math.max(0, timer.endAt - Date.now());
+  const timerLeftText = () => fmtDuration(Math.ceil(timerLeft() / 1000));
+
+  function restRowHtml() {
+    const rt = state.settings.restTimer;
+    if (!rt.enabled) return '';
+    if (timer.running || timer.done) {
+      return `<div class="rest-row${timer.done ? ' done' : ''}">
+        <button data-action="timer-open" aria-label="Show rest timer">${dialSvg('dial-mini')}</button>
+        <span class="label">${timer.done ? 'Rest over' : 'Resting'}<b data-timer-text>${timer.done ? '0:00' : timerLeftText()}</b></span>
+        ${timer.done
+          ? '<button class="btn btn-secondary btn-sm" data-action="timer-stop">Dismiss</button>'
+          : `<button class="btn btn-secondary btn-sm" data-action="timer-add" data-step="15">+15s</button>
+             <button class="btn btn-secondary btn-sm" data-action="timer-stop">Skip</button>`}
+      </div>`;
+    }
+    return `<div class="rest-row"><span class="label">Rest timer<b>${fmtDuration(rt.durationSec)}</b></span>
+      <button class="btn btn-secondary btn-sm" data-action="timer-start">Start rest</button></div>`;
+  }
+
+  function paintTimer() {
+    const left = timerLeft();
+    const elapsed = (Date.now() - timer.startAt) / 1000;
+    const frac = timer.done ? 0 : Math.min(1, left / (timer.total * 1000));
+    $$('[data-dial]').forEach((svg) => {
+      svg.querySelector('[data-arc]').setAttribute('stroke-dasharray', `${(frac * 100).toFixed(2)} 100`);
+      const angle = timer.done ? 0 : (elapsed % 60) * 6;
+      svg.querySelector('[data-hand]').setAttribute('transform', `rotate(${angle.toFixed(1)} 100 100)`);
+      svg.querySelector('[data-readout]').textContent = timer.done ? '0:00' : timerLeftText();
+    });
+    $$('[data-timer-text]').forEach((el) => { el.textContent = timer.done ? '0:00' : timerLeftText(); });
+  }
+
+  function refreshRestUi() {
+    const slot = $('[data-rest-slot]');
+    if (slot) slot.innerHTML = restRowHtml();
+    renderOverlay();
+    paintTimer();
+  }
+
+  function renderOverlay() {
+    const ov = $('#timer-overlay');
+    if (!timer.overlay || (!timer.running && !timer.done)) { ov.hidden = true; ov.innerHTML = ''; return; }
+    ov.hidden = false;
+    ov.innerHTML = `<div class="timer-panel${timer.done ? ' done' : ''}" role="dialog" aria-label="Rest timer">
+      ${dialSvg('dial-big')}
+      <span class="title">${timer.done ? 'Rest over' : 'Resting'}</span>
+      ${timer.done
+        ? '<button class="btn btn-primary btn-block" data-action="timer-stop">Back to it</button>'
+        : `<div class="btns">
+            <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
+            <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
+            <button class="btn btn-secondary" data-action="timer-stop">Skip</button>
+          </div>
+          <button class="text-btn" data-action="timer-hide">Hide</button>`}
+    </div>`;
+  }
+
+  async function wakeOn() {
+    try { if ('wakeLock' in navigator && !timer.wake) timer.wake = await navigator.wakeLock.request('screen'); } catch (_) { /* not allowed */ }
+  }
+  function wakeOff() {
+    if (timer.wake) { timer.wake.release().catch(() => {}); timer.wake = null; }
+  }
+
+  function timerStart(sec) {
+    Object.assign(timer, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + sec * 1000, total: sec });
+    clearInterval(timer.interval);
+    timer.interval = setInterval(timerTick, 200);
+    wakeOn();
+    refreshRestUi();
+  }
+  function timerTick() {
+    if (timer.running && timerLeft() <= 0) {
+      timer.running = false;
+      timer.done = true;
+      timer.overlay = true;
+      clearInterval(timer.interval);
+      if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
+      setTimeout(wakeOff, 15000);
+      refreshRestUi();
+      return;
+    }
+    paintTimer();
+  }
+  function timerStop() {
+    Object.assign(timer, { running: false, done: false, overlay: false });
+    clearInterval(timer.interval);
+    wakeOff();
+    refreshRestUi();
+  }
+
+  actions['timer-start'] = () => timerStart(state.settings.restTimer.durationSec);
+  actions['timer-stop'] = () => timerStop();
+  actions['timer-open'] = () => { timer.overlay = true; renderOverlay(); paintTimer(); };
+  actions['timer-hide'] = () => { timer.overlay = false; renderOverlay(); };
+  actions['timer-add'] = (el) => {
+    if (!timer.running) return;
+    const d = Number(el.dataset.step) * 1000;
+    timer.endAt = Math.max(Date.now() + 1000, timer.endAt + d);
+    timer.total = Math.max(1, timer.total + d / 1000);
+    paintTimer();
+  };
+  $('#timer-overlay').addEventListener('click', (ev) => {
+    if (ev.target.id !== 'timer-overlay') return;
+    if (timer.done) timerStop();
+    else { timer.overlay = false; renderOverlay(); }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (timer.running) { wakeOn(); timerTick(); }
+    }
+  });
+
+  /* ---------- Finish ---------- */
+
+  actions['w-finish'] = async () => {
+    const s = await Store.getActiveSession();
+    const n = mainSets(s).length;
+    if (!n) {
+      const ok = await confirmSheet({
+        title: 'Discard this workout?',
+        body: 'No sets were logged, so there is nothing to save.',
+        confirmLabel: 'Discard',
+        danger: true,
+      });
+      if (!ok) return;
+      await Store.deleteSession(s.id);
+      timerStop();
+      Object.assign(state, { entry: null, dropDraft: null });
+      await render();
+      return;
+    }
+    const ok = await confirmSheet({
+      title: 'Finish workout?',
+      body: `${plural(n, 'set')} will be saved to ${prettyDate(s.date, true)}.`,
+      confirmLabel: 'Finish',
+    });
+    if (!ok) return;
+    await Store.finishSession(s.id);
+    timerStop();
+    Object.assign(state, { entry: null, dropDraft: null });
+    go(`#log/done/${encodeURIComponent(s.id)}`);
+  };
+
+  function durationText(s) {
+    const min = Math.round((new Date(s.finishedAt) - new Date(s.startedAt)) / 60000);
+    if (!(min >= 0) || min > 12 * 60) return '—';
+    return min >= 60 ? `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m` : `${min}m`;
+  }
+
+  async function renderFinished(id) {
+    state.activeSession = null;
+    const s = await Store.getSession(id);
+    if (!s) return `${head('Log')}<p class="empty">That workout no longer exists.</p>`;
+    const ms = (await Store.listMilestones()).filter((m) => m.sessionId === id);
+    const bws = await Store.listBodyweights();
+    const mine = bws.find((b) => b.sessionId === id);
+    const latest = bws[bws.length - 1];
+    const main = mainSets(s);
+    const drops = s.sets.length - main.length;
+    const exIds = s.exerciseOrder.filter((x) => mainSets(s, x).length);
+    return `${head('Workout saved')}
+      <p class="sum-date"><b>${esc(sessionLabel(s))}</b> · ${esc(prettyDate(s.date, true))}</p>
+      <div class="stats">
+        <div><b>${main.length}</b><span>${main.length === 1 ? 'set' : 'sets'}</span></div>
+        <div><b>${exIds.length}</b><span>${exIds.length === 1 ? 'exercise' : 'exercises'}</span></div>
+        <div><b>${ms.length}</b><span>${ms.length === 1 ? 'PR' : 'PRs'}</span></div>
+        <div><b>${esc(durationText(s))}</b><span>time</span></div>
+      </div>
+      ${ms.length ? `<section class="group sum-list"><h2 class="group-title">PRs hit</h2><div class="list">
+        ${ms.map((m) => `<div class="row pr-line">${TROPHY}<span class="row-label">${esc(exerciseName(m.exerciseId))}
+          <small>${m.type === 'weight' ? 'Weight PR' : 'Rep PR'}</small></span>
+          <span class="num-r">${esc(weightPlain(m.weightKg))} × ${m.reps}</span></div>`).join('')}
+      </div></section>` : ''}
+      <section class="group sum-list"><h2 class="group-title">Exercises</h2><div class="list">
+        ${exIds.map((x) => {
+          const sets = mainSets(s, x);
+          const d = s.sets.filter((y) => y.kind === 'drop' && y.exerciseId === x).length;
+          return `<div class="row"><span class="row-label">${esc(exerciseName(x))}<small class="num">${esc(setsSummary(sets))}</small></span>
+            <span class="num-r">${plural(sets.length, 'set')}${d ? ` + ${d} drop` : ''}</span></div>`;
+        }).join('')}
+      </div>${drops ? `<p class="group-note">${plural(drops, 'drop set')} not counted as sets.</p>` : ''}</section>
+      <section class="group">
+        <h2 class="group-title">Bodyweight (optional)</h2>
+        <div class="page-pad" style="padding-top:0">
+          <div class="bw-form">
+            <div class="field">
+              <label class="visually-hidden" for="bw-in">Bodyweight</label>
+              <div class="w-input"><input id="bw-in" type="text" inputmode="decimal" autocomplete="off"
+                value="${mine ? esc(inputText(mine.kg)) : ''}" placeholder="${latest ? esc(inputText(latest.kg)) : ''}"><span class="unit">${Units.unit}</span></div>
+            </div>
+            <button class="btn btn-secondary" data-action="bw-save" data-session="${esc(id)}">${mine ? 'Update' : 'Save'}</button>
+          </div>
+        </div>
+      </section>
+      <div class="actions-bar"><a class="btn btn-primary btn-xl btn-block" href="#log">Done</a></div>`;
+  }
+
+  actions['bw-save'] = async (el) => {
+    const w = Units.parse($('#bw-in').value);
+    if (w.error || w.kg == null || w.kg <= 0) throw new Error('Enter your bodyweight as a number.');
+    await Store.logBodyweight({ sessionId: el.dataset.session, kg: w.kg });
+    await render({ keepScroll: true });
+    toast('Bodyweight saved');
+  };
+
   screens.calendar = {
     async render() {
       return `${head('Calendar')}<div class="placeholder"><strong>The calendar comes in stage 5.</strong></div>`;
