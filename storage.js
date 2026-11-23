@@ -120,6 +120,7 @@
   /* Defaults                                                            */
   /* ------------------------------------------------------------------ */
 
+  const ACCENTS = ['green', 'blue', 'red', 'orange', 'yellow', 'graphite'];
   const MUSCLE_GROUPS = ['chest', 'back', 'shoulders', 'legs', 'arms', 'core', 'other'];
 
   const PRESET_EXERCISES = [
@@ -144,6 +145,7 @@
     return {
       units: 'kg',            // 'kg' | 'lb'
       theme: 'system',        // 'system' | 'light' | 'dark'
+      accent: 'green',        // colour option: green (default), blue, red, orange, yellow, graphite
       rpeEnabled: false,
       restTimer: { enabled: false, autoStart: false, durationSec: 120 },
       // days: keyed by JS weekday (0 = Sunday) -> sessionTypeId or null
@@ -272,6 +274,7 @@
   const Store = {
     SCHEMA_VERSION,
     MUSCLE_GROUPS,
+    ACCENTS,
     StoreError,
     util: { dateKey, newId },
     createLocalBackend,
@@ -301,6 +304,7 @@
         const { restTimer, schedule, ...rest } = patch || {};
         if (rest.units !== undefined) assert(['kg', 'lb'].includes(rest.units), 'Units must be kg or lb.');
         if (rest.theme !== undefined) assert(['system', 'light', 'dark'].includes(rest.theme), 'Unknown theme.');
+        if (rest.accent !== undefined) assert(ACCENTS.includes(rest.accent), 'Unknown colour.');
         Object.assign(s, rest);
         if (restTimer) {
           Object.assign(s.restTimer, restTimer);

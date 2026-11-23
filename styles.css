@@ -19,6 +19,7 @@
   --danger: #B3261E;
   --backdrop: rgba(15, 26, 19, 0.45);
   --accent-hover: #0E6639;
+  --mark: #127A43;
   --hover: #EDF1EE;
 
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -37,7 +38,7 @@
     --bg: #0E1411; --surface: #151D18; --sunk: #1A241E; --line: #23302A; --line-strong: #3C4E43;
     --fg: #E7EFE9; --muted: #8EA095; --accent: #3CC27A; --accent-ink: #04140B; --accent-text: #5BD493;
     --danger: #FF7B72; --backdrop: rgba(0, 0, 0, 0.6);
-    --accent-hover: #5BD493; --hover: #1C2620;
+    --accent-hover: #5BD493; --hover: #1C2620; --mark: #3CC27A;
     color-scheme: dark;
   }
 }
@@ -45,8 +46,97 @@
   --bg: #0E1411; --surface: #151D18; --sunk: #1A241E; --line: #23302A; --line-strong: #3C4E43;
   --fg: #E7EFE9; --muted: #8EA095; --accent: #3CC27A; --accent-ink: #04140B; --accent-text: #5BD493;
   --danger: #FF7B72; --backdrop: rgba(0, 0, 0, 0.6);
-  --accent-hover: #5BD493; --hover: #1C2620;
+  --accent-hover: #5BD493; --hover: #1C2620; --mark: #3CC27A;
   color-scheme: dark;
+}
+
+/* ---------- Colour options (Settings → Colour). Green above is the default. ----------
+   Each one is a full palette with its own tinted greys, for light and dark.
+   Dark rules are more specific, so they win over the light ones in dark mode. */
+:root[data-accent="blue"] {
+  --bg: #F5F7FA; --surface: #FFFFFF; --sunk: #EAEEF3; --line: #DCE1E8; --line-strong: #A5AFBC;
+  --fg: #0E1726; --muted: #566275; --accent: #1F4FD8; --accent-ink: #FFFFFF; --accent-text: #1F4FD8;
+  --accent-hover: #1A43B8; --hover: #EDF1F6; --mark: #1F4FD8;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="blue"]:not([data-theme="light"]) {
+  --bg: #0E141C; --surface: #151D28; --sunk: #1A2431; --line: #243041; --line-strong: #3D4D62;
+  --fg: #E8EEF6; --muted: #8E9BAE; --accent: #6E9BFF; --accent-ink: #08122A; --accent-text: #8DB0FF;
+  --accent-hover: #8DB0FF; --hover: #1C2533; --mark: #6E9BFF;
+  }
+}
+:root[data-accent="blue"][data-theme="dark"] {
+  --bg: #0E141C; --surface: #151D28; --sunk: #1A2431; --line: #243041; --line-strong: #3D4D62;
+  --fg: #E8EEF6; --muted: #8E9BAE; --accent: #6E9BFF; --accent-ink: #08122A; --accent-text: #8DB0FF;
+  --accent-hover: #8DB0FF; --hover: #1C2533; --mark: #6E9BFF;
+}
+:root[data-accent="red"] {
+  --bg: #FAFAF9; --surface: #FFFFFF; --sunk: #F0EEEC; --line: #E2E0DD; --line-strong: #A39F9B;
+  --fg: #1A1716; --muted: #5F5A56; --accent: #C8102E; --accent-ink: #FFFFFF; --accent-text: #B00E28;
+  --accent-hover: #A80D27; --hover: #F3F1EF; --mark: #C8102E;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="red"]:not([data-theme="light"]) {
+  --bg: #171312; --surface: #211C1B; --sunk: #282221; --line: #352D2B; --line-strong: #574B48;
+  --fg: #F4EFEC; --muted: #A69B96; --accent: #FF4D5E; --accent-ink: #1A0508; --accent-text: #FF7A86;
+  --accent-hover: #FF6B79; --hover: #2A2322; --mark: #FF4D5E;
+  }
+}
+:root[data-accent="red"][data-theme="dark"] {
+  --bg: #171312; --surface: #211C1B; --sunk: #282221; --line: #352D2B; --line-strong: #574B48;
+  --fg: #F4EFEC; --muted: #A69B96; --accent: #FF4D5E; --accent-ink: #1A0508; --accent-text: #FF7A86;
+  --accent-hover: #FF6B79; --hover: #2A2322; --mark: #FF4D5E;
+}
+:root[data-accent="orange"] {
+  --bg: #F5F4F2; --surface: #FFFFFF; --sunk: #ECEAE6; --line: #DCD9D5; --line-strong: #9E9993;
+  --fg: #191614; --muted: #5E5853; --accent: #C93F0A; --accent-ink: #FFFFFF; --accent-text: #B33807;
+  --accent-hover: #A93507; --hover: #EFEDEA; --mark: #C93F0A;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="orange"]:not([data-theme="light"]) {
+  --bg: #141210; --surface: #1D1A17; --sunk: #24201C; --line: #2F2A26; --line-strong: #4D4540;
+  --fg: #F3EFEB; --muted: #A39A92; --accent: #FF6A2B; --accent-ink: #1A0A02; --accent-text: #FF8A55;
+  --accent-hover: #FF8A55; --hover: #26221E; --mark: #FF6A2B;
+  }
+}
+:root[data-accent="orange"][data-theme="dark"] {
+  --bg: #141210; --surface: #1D1A17; --sunk: #24201C; --line: #2F2A26; --line-strong: #4D4540;
+  --fg: #F3EFEB; --muted: #A39A92; --accent: #FF6A2B; --accent-ink: #1A0A02; --accent-text: #FF8A55;
+  --accent-hover: #FF8A55; --hover: #26221E; --mark: #FF6A2B;
+}
+:root[data-accent="yellow"] {
+  --bg: #F1F1EF; --surface: #FFFFFF; --sunk: #E7E7E2; --line: #D8D7D1; --line-strong: #8F8D85;
+  --fg: #141412; --muted: #5A5852; --accent: #F2C200; --accent-ink: #141412; --accent-text: #6E5600;
+  --accent-hover: #DDB100; --hover: #E9E9E5; --mark: #A88400;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="yellow"]:not([data-theme="light"]) {
+  --bg: #151513; --surface: #1D1D1B; --sunk: #232320; --line: #2F2E2B; --line-strong: #4C4A45;
+  --fg: #F2F1EC; --muted: #9C9991; --accent: #F5C518; --accent-ink: #141412; --accent-text: #F5C518;
+  --accent-hover: #FFD43B; --hover: #252522; --mark: #F5C518;
+  }
+}
+:root[data-accent="yellow"][data-theme="dark"] {
+  --bg: #151513; --surface: #1D1D1B; --sunk: #232320; --line: #2F2E2B; --line-strong: #4C4A45;
+  --fg: #F2F1EC; --muted: #9C9991; --accent: #F5C518; --accent-ink: #141412; --accent-text: #F5C518;
+  --accent-hover: #FFD43B; --hover: #252522; --mark: #F5C518;
+}
+:root[data-accent="graphite"] {
+  --bg: #F2F2F2; --surface: #FFFFFF; --sunk: #E8E8E8; --line: #D7D7D7; --line-strong: #8F8F8F;
+  --fg: #141414; --muted: #5C5C5C; --accent: #1A1A1A; --accent-ink: #FFFFFF; --accent-text: #1A1A1A;
+  --accent-hover: #333333; --hover: #EBEBEB; --mark: #1A1A1A;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="graphite"]:not([data-theme="light"]) {
+  --bg: #121212; --surface: #1B1B1B; --sunk: #222222; --line: #2C2C2C; --line-strong: #4A4A4A;
+  --fg: #F0F0F0; --muted: #9C9C9C; --accent: #F0F0F0; --accent-ink: #121212; --accent-text: #F0F0F0;
+  --accent-hover: #FFFFFF; --hover: #242424; --mark: #F0F0F0;
+  }
+}
+:root[data-accent="graphite"][data-theme="dark"] {
+  --bg: #121212; --surface: #1B1B1B; --sunk: #222222; --line: #2C2C2C; --line-strong: #4A4A4A;
+  --fg: #F0F0F0; --muted: #9C9C9C; --accent: #F0F0F0; --accent-ink: #121212; --accent-text: #F0F0F0;
+  --accent-hover: #FFFFFF; --hover: #242424; --mark: #F0F0F0;
 }
 
 /* ---------- Base ---------- */
@@ -483,9 +573,9 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .dial .tick.major { stroke: var(--fg); stroke-width: 1.6; }
 .dial .numeral { fill: var(--muted); font-family: var(--f-num); font-size: 13px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
 .dial .track { fill: none; stroke: var(--sunk); stroke-width: 5; }
-.dial .arc { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: butt; }
-.dial .hand { stroke: var(--accent); stroke-width: 2.5; stroke-linecap: square; }
-.dial .hub { fill: var(--accent); }
+.dial .arc { fill: none; stroke: var(--mark); stroke-width: 5; stroke-linecap: butt; }
+.dial .hand { stroke: var(--mark); stroke-width: 2.5; stroke-linecap: square; }
+.dial .hub { fill: var(--mark); }
 .dial .hub-in { fill: var(--surface); }
 .dial .readout { fill: var(--fg); font-family: var(--f-num); font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
 .dial .caption { fill: var(--muted); font-family: var(--f-ui); font-size: 11px; font-weight: 600; text-anchor: middle; }
@@ -601,14 +691,14 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .chart-box svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart-key { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 2px 8px 6px; font-size: 12px; color: var(--muted); }
 .chart-key span { display: inline-flex; align-items: center; gap: 6px; }
-.chart-key i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--accent); }
-.chart-key i.hollow { background: var(--surface); box-shadow: inset 0 0 0 2px var(--accent); }
+.chart-key i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--mark); }
+.chart-key i.hollow { background: var(--surface); box-shadow: inset 0 0 0 2px var(--mark); }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .base { stroke: var(--line-strong); stroke-width: 1; }
 .chart .tick-label { fill: var(--muted); font-family: var(--f-num); font-size: 11px; font-variant-numeric: tabular-nums; }
-.chart .ln { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart .pt { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
-.chart .pt.hollow { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.chart .ln { fill: none; stroke: var(--mark); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .pt { fill: var(--mark); stroke: var(--surface); stroke-width: 2; }
+.chart .pt.hollow { fill: var(--surface); stroke: var(--mark); stroke-width: 2; }
 .chart .pt.sel { stroke: var(--fg); stroke-width: 2.5; }
 .chart .hit { fill: transparent; cursor: pointer; }
 .chart .hit:focus-visible { outline: none; stroke: var(--accent-text); stroke-width: 2; }
@@ -629,6 +719,26 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .placeholder strong { color: var(--fg); font-size: 16px; }
 .fatal { padding: 24px 16px; display: grid; gap: 12px; }
 .fatal h1 { margin: 0; font-size: 22px; }
+
+/* ---------- Colour swatches (Settings) ---------- */
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.swatch {
+  width: 30px; height: 30px;
+  border-radius: var(--r);
+  border: 1px solid var(--line-strong);
+  position: relative;
+}
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--fg); }
+.swatch[aria-pressed="true"]::after {
+  content: "";
+  position: absolute; left: 50%; top: 50%;
+  width: 6px; height: 11px;
+  margin: -7px 0 0 -3px;
+  border-right: 2px solid var(--sw-ink, #fff);
+  border-bottom: 2px solid var(--sw-ink, #fff);
+  transform: rotate(45deg);
+}
+.row.wrap { flex-wrap: wrap; }
 
 /* ================================================================== */
 /* Motion                                                              */
@@ -677,7 +787,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
   .set-row:hover, .drop-row:hover { background: var(--hover); }
   .grp .drop-row:hover { background: var(--hover); }
   .input:hover, .select:hover, .w-input:hover { border-color: var(--fg); }
-  .chart .hit:hover { fill: var(--accent); fill-opacity: 0.12; }
+  .chart .hit:hover { fill: var(--mark); fill-opacity: 0.12; }
   .pr-pop:hover { filter: brightness(1.05); }
 }
 

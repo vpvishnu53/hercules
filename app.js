@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.11.2';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.12';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -96,13 +96,27 @@
 
   const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
+  /** Colour options shown in Settings: [id, name, light swatch, dark swatch, tick colour light, tick colour dark]. */
+  const ACCENT_OPTIONS = [
+    ['green', 'Green', '#127A43', '#3CC27A', '#FFFFFF', '#04140B'],
+    ['blue', 'Blue', '#1F4FD8', '#6E9BFF', '#FFFFFF', '#08122A'],
+    ['red', 'Red', '#C8102E', '#FF4D5E', '#FFFFFF', '#1A0508'],
+    ['orange', 'Orange', '#C93F0A', '#FF6A2B', '#FFFFFF', '#1A0A02'],
+    ['yellow', 'Yellow', '#F2C200', '#F5C518', '#141412', '#141412'],
+    ['graphite', 'Graphite', '#1A1A1A', '#F0F0F0', '#FFFFFF', '#121212'],
+  ];
+
   function applyTheme() {
     const pref = state.settings ? state.settings.theme : 'system';
+    const accent = state.settings ? state.settings.accent : 'green';
     const root = document.documentElement;
     if (pref === 'system') delete root.dataset.theme;
     else root.dataset.theme = pref;
-    const dark = pref === 'dark' || (pref === 'system' && darkQuery.matches);
-    $('meta[name="theme-color"]').setAttribute('content', dark ? '#0E1411' : '#F3F5F3');
+    if (!accent || accent === 'green') delete root.dataset.accent;
+    else root.dataset.accent = accent;
+    // The phone's status bar matches the page background of the current palette.
+    const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+    $('meta[name="theme-color"]').setAttribute('content', bg || '#F3F5F3');
   }
   const isDark = (pref) => pref === 'dark' || (pref === 'system' && darkQuery.matches);
 
@@ -1811,6 +1825,14 @@
           ${seg('set-units', s.units, [['kg', 'kg'], ['lb', 'lb']])}</div>
         <div class="row"><span class="row-label">Theme</span>
           ${seg('set-theme', s.theme, [['system', 'Auto'], ['light', 'Light'], ['dark', 'Dark']])}</div>
+        <div class="row wrap"><span class="row-label">Colour<small>${esc((ACCENT_OPTIONS.find((o) => o[0] === (s.accent || 'green')) || ACCENT_OPTIONS[0])[1])}</small></span>
+          <div class="swatches" role="group" aria-label="Colour">
+            ${ACCENT_OPTIONS.map(([id, name, light, dark, inkL, inkD]) => {
+              const d = isDark(s.theme);
+              return `<button class="swatch" data-action="set-accent" data-value="${id}" aria-pressed="${(s.accent || 'green') === id}"
+                aria-label="${name}" title="${name}" style="background:${d ? dark : light};--sw-ink:${d ? inkD : inkL}"></button>`;
+            }).join('')}
+          </div></div>
       </div>
     </section>
 
@@ -1903,6 +1925,12 @@
     if (isDark(next) === isDark(state.settings.theme)) return change();   // looks the same: no animation
     const b = el.getBoundingClientRect();
     return withThemeTransition(change, { x: b.left + b.width / 2, y: b.top + b.height / 2 });
+  };
+  actions['set-accent'] = (el) => {
+    const next = el.dataset.value;
+    if (next === (state.settings.accent || 'green')) return null;
+    const b = el.getBoundingClientRect();
+    return withThemeTransition(() => saveSettings({ accent: next }), { x: b.left + b.width / 2, y: b.top + b.height / 2 });
   };
   actions['toggle-rpe'] = () => saveSettings({ rpeEnabled: !state.settings.rpeEnabled });
   actions['toggle-rest'] = () => saveSettings({ restTimer: { enabled: !state.settings.restTimer.enabled } });
