@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.17';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.18';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -908,6 +908,7 @@
         <span class="clock num" data-clock>${esc(clockText(session))}</span>
         <span class="grow"></span>
         <button class="btn-out" data-action="w-add-ex">+ Exercise</button>
+        <button class="quit" data-action="w-quit">Quit</button>
         <button class="finish" data-action="w-finish">Finish</button>
       </header>`;
 
@@ -1016,11 +1017,11 @@
           <div class="last">${lastTime}</div>
         </div>
       </div>
-      ${setsHtml ? `<div class="w-list sets" data-keep-scroll="w-list" aria-label="Sets this session">${setsHtml}</div>` : ''}
+      <div class="w-list sets${setsHtml ? '' : ' empty'}" data-keep-scroll="w-list" aria-label="Sets this session">${setsHtml}</div>
       <div class="w-foot">
+      <div class="corner-slot" data-corner-slot>${cornerTimerHtml()}</div>
       ${nextHtml}
       <div class="entry">
-        <div class="corner-slot" data-corner-slot>${cornerTimerHtml()}</div>
         <div data-rest-slot>${restRowHtml()}</div>
         <div class="fields">
           <div>
@@ -1391,7 +1392,7 @@
       const a = (n * 6 * Math.PI) / 180;
       parts.push(`<text class="numeral" x="${(100 + 68 * Math.sin(a)).toFixed(1)}" y="${(100 - 68 * Math.cos(a)).toFixed(1)}">${n}</text>`);
     }
-    const caption = { rest: 'rest left', down: 'left to hold', up: 'elapsed' }[mode];
+    const caption = { rest: 'rest left', down: 'left to hold', up: 'elapsed', 'gp-up': 'elapsed', 'gp-down': 'left' }[mode];
     return `<svg class="dial ${cls}" viewBox="0 0 200 200" aria-hidden="true" data-dial="${mode}">
       <circle class="face" cx="100" cy="100" r="99"/>
       <circle class="track" cx="100" cy="100" r="94"/>
@@ -1442,7 +1443,7 @@
   /** The row at the top of the entry block (placement 'panel'). */
   function restRowHtml() {
     const rt = state.settings.restTimer;
-    if (!rt.enabled || rt.placement === 'corner') return '';
+    if (!rt.enabled) return '';
     if (timer.running || timer.done) {
       return `<div class="rest-row${timer.done ? ' done' : ''}">
         <button data-action="timer-open" aria-label="Show rest timer">${dialSvg('dial-mini')}</button>
@@ -1457,14 +1458,107 @@
       <button class="btn btn-secondary btn-sm rest-start" data-action="timer-start">${hourglassSvg('hg-rest-row')}Start rest</button></div>`;
   }
 
-  /** The hourglass button (placement 'corner'), shown above the entry block. */
+
+  /* ----- General clock (the hourglass in the corner of every workout) ----- */
+  /* A stopwatch by default, or a countdown timer. Independent of rest and hold. */
+
+  const gp = { mode: 'up', running: false, done: false, startAt: 0, endAt: 0, acc: 0, duration: 60, overlay: false, interval: null };
+  const gpLeftMs = () => Math.max(0, gp.endAt - Date.now());
+  const gpElapsedMs = () => gp.acc + (gp.running ? Date.now() - gp.startAt : 0);
+  const gpActive = () => gp.running || gp.done || (gp.mode === 'up' && gp.acc > 0);
+  const gpText = (precise) => {
+    if (gp.mode === 'down') return gp.done ? '0:00' : fmtDuration(gp.running ? Math.ceil(gpLeftMs() / 1000) : gp.duration);
+    const ms = gpElapsedMs();
+    const sec = Math.floor(ms / 1000);
+    return precise ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}` : fmtDuration(sec);
+  };
+
+  /** The hourglass button in the bottom-right corner of the workout screen. */
   function cornerTimerHtml() {
-    const rt = state.settings.restTimer;
-    if (!rt.enabled || rt.placement !== 'corner') return '';
-    return `<button class="corner-timer${timer.done ? ' done' : ''}${timer.running ? ' running' : ''}"
-      data-action="${timer.running || timer.done ? 'timer-open' : 'timer-start'}" aria-label="${timer.running ? 'Show rest timer' : 'Start rest'}">
-      ${hourglassSvg('hg-corner')}<span class="t num" data-corner-text></span></button>`;
+    return `<button class="corner-timer${gp.done ? ' done' : ''}${gp.running ? ' running' : ''}" data-action="gp-open"
+      aria-label="${gp.mode === 'down' ? 'Timer' : 'Stopwatch'}">${hourglassSvg('hg-corner')}<span class="t num" data-corner-text></span></button>`;
   }
+
+  function renderGpOverlay() {
+    const ov = $('#gp-overlay');
+    if (!gp.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
+    ov.hidden = false;
+    const busy = gp.running || gp.done;
+    let controls;
+    if (gp.mode === 'up') {
+      controls = gp.running
+        ? `<button class="btn btn-secondary" data-action="gp-reset">Reset</button>
+           <button class="btn btn-primary" data-action="gp-stop">Stop</button>`
+        : `<button class="btn btn-secondary" data-action="gp-reset">Reset</button>
+           <button class="btn btn-primary" data-action="gp-start">${gp.acc ? 'Resume' : 'Start'}</button>`;
+    } else if (gp.done) {
+      controls = `<button class="btn btn-secondary" data-action="gp-start">Again</button>
+        <button class="btn btn-primary" data-action="gp-reset">Done</button>`;
+    } else if (gp.running) {
+      controls = `<button class="btn btn-secondary" data-action="gp-add" data-step="15">+15s</button>
+        <button class="btn btn-primary" data-action="gp-reset">Stop</button>`;
+    } else {
+      controls = `<div class="btns">
+          <button class="btn btn-secondary" data-action="gp-add" data-step="-15">−15s</button>
+          <button class="btn btn-primary" data-action="gp-start">Start</button>
+          <button class="btn btn-secondary" data-action="gp-add" data-step="15">+15s</button>
+        </div>`;
+    }
+    ov.innerHTML = `<div class="timer-panel${gp.done ? ' done' : ''}" role="dialog" aria-label="Timer">
+      ${busy ? '' : `<div class="seg timer-tabs" role="group">
+        <button data-action="gp-mode" data-mode="up" aria-pressed="${gp.mode === 'up'}">Stopwatch</button>
+        <button data-action="gp-mode" data-mode="down" aria-pressed="${gp.mode === 'down'}">Timer</button>
+      </div>`}
+      ${dialSvg('dial-big', gp.mode === 'up' ? 'gp-up' : 'gp-down')}
+      <span class="title">${gp.done ? "Time's up" : gp.mode === 'up' ? 'Stopwatch' : gp.running ? 'Timer' : 'Set a time'}</span>
+      ${gp.mode === 'down' && !gp.running && !gp.done ? controls : `<div class="btns two">${controls}</div>`}
+      <button class="text-btn" data-action="gp-hide">${busy ? 'Hide' : 'Close'}</button>
+    </div>`;
+  }
+
+  function gpTick() {
+    if (gp.running && gp.mode === 'down' && gpLeftMs() <= 0) {
+      Object.assign(gp, { running: false, done: true, overlay: true });
+      clearInterval(gp.interval);
+      if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
+      setTimeout(wakeOff, 15000);
+      refreshRestUi();
+      return;
+    }
+    paintTimer();
+  }
+  function gpRun() {
+    clearInterval(gp.interval);
+    gp.interval = setInterval(gpTick, gp.mode === 'up' ? 100 : 200);
+    wakeOn();
+    refreshRestUi();
+  }
+  actions['gp-open'] = () => { gp.overlay = true; renderGpOverlay(); paintTimer(); };
+  actions['gp-hide'] = () => { gp.overlay = false; renderGpOverlay(); };
+  actions['gp-mode'] = (el) => { gp.mode = el.dataset.mode; gp.acc = 0; renderGpOverlay(); paintTimer(); refreshRestUi(); };
+  actions['gp-start'] = () => {
+    if (gp.mode === 'down') Object.assign(gp, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + gp.duration * 1000 });
+    else Object.assign(gp, { running: true, startAt: Date.now() });
+    gpRun();
+  };
+  actions['gp-stop'] = () => {
+    if (gp.running) Object.assign(gp, { running: false, acc: gp.acc + (Date.now() - gp.startAt) });
+    clearInterval(gp.interval);
+    wakeOff();
+    refreshRestUi();
+  };
+  actions['gp-reset'] = () => {
+    Object.assign(gp, { running: false, done: false, acc: 0 });
+    clearInterval(gp.interval);
+    wakeOff();
+    refreshRestUi();
+  };
+  actions['gp-add'] = (el) => {
+    const d = Number(el.dataset.step);
+    if (gp.running) gp.endAt = Math.max(Date.now() + 1000, gp.endAt + d * 1000);
+    else gp.duration = Math.min(3600, Math.max(5, gp.duration + d));
+    paintTimer();
+  };
 
   /* ----- Hold timer (timed exercises) ----- */
 
@@ -1535,6 +1629,15 @@
         frac = restFrac;
         angle = timer.running ? (restElapsed % 60) * 6 : 0;
         text = timer.done ? '0:00' : timer.running ? timerLeftText() : fmtDuration(restSecs());
+      } else if (mode === 'gp-up') {
+        const sec = gpElapsedMs() / 1000;
+        frac = (sec % 60) / 60;
+        angle = (sec % 60) * 6;
+        text = gpText(true);
+      } else if (mode === 'gp-down') {
+        frac = gp.done ? 0 : gp.running ? Math.min(1, gpLeftMs() / (gp.duration * 1000)) : 1;
+        angle = gp.running ? (((gp.duration * 1000 - gpLeftMs()) / 1000) % 60) * 6 : 0;
+        text = gpText();
       } else {
         frac = holdFrac;
         angle = (hElapsed % 60) * 6;
@@ -1547,10 +1650,15 @@
     $$('[data-timer-text]').forEach((el) => { el.textContent = timer.done ? '0:00' : timerLeftText(); });
     $$('[data-hold-text]').forEach((el) => { el.textContent = holdText(); });
     // Rest hourglasses drain over the rest; the hold hourglass drains over the hold (or trickles each minute).
-    $$('[data-hourglass="hg-corner"], [data-hourglass="hg-rest-row"]').forEach((svg) => setSand(svg, restFrac));
+    $$('[data-hourglass="hg-rest-row"]').forEach((svg) => setSand(svg, restFrac));
+    // Corner hourglass: drains with the timer, trickles once a minute with the stopwatch.
+    const gpSand = gp.mode === 'down'
+      ? (gp.done ? 0 : gp.running ? gpLeftMs() / (gp.duration * 1000) : 1)
+      : (gpActive() ? 1 - ((gpElapsedMs() / 1000) % 60) / 60 : 1);
+    $$('[data-hourglass="hg-corner"]').forEach((svg) => setSand(svg, gpSand));
     $$('[data-hourglass="hg-hold"]').forEach((svg) => setSand(svg, hold.running ? (hold.mode === 'down' ? holdFrac : 1 - holdFrac) : 1));
     const t = $('[data-corner-text]');
-    if (t) t.textContent = timer.running ? timerLeftText() : timer.done ? '0:00' : '';
+    if (t) t.textContent = gpActive() ? gpText() : '';
   }
 
   function refreshRestUi() {
@@ -1562,6 +1670,7 @@
     if (holdSlot && state.entry) holdSlot.innerHTML = holdButtonsHtml(state.entry);
     renderOverlay();
     renderHoldOverlay();
+    renderGpOverlay();
     paintTimer();
   }
 
@@ -1600,7 +1709,7 @@
     try { if ('wakeLock' in navigator && !timer.wake) timer.wake = await navigator.wakeLock.request('screen'); } catch (_) { /* not allowed */ }
   }
   function wakeOff() {
-    if (timer.wake && !timer.running && !hold.running) { timer.wake.release().catch(() => {}); timer.wake = null; }
+    if (timer.wake && !timer.running && !hold.running && !(typeof gp !== 'undefined' && gp.running)) { timer.wake.release().catch(() => {}); timer.wake = null; }
   }
 
   /* ----- Rest timer actions ----- */
@@ -1704,10 +1813,13 @@
     await actions['log-set']();
   };
 
-  for (const id of ['timer-overlay', 'hold-overlay']) {
+  for (const id of ['timer-overlay', 'hold-overlay', 'gp-overlay']) {
     $(`#${id}`).addEventListener('click', (ev) => {
       if (ev.target.id !== id) return;
-      if (id === 'timer-overlay') {
+      if (id === 'gp-overlay') {
+        if (gp.done) actions['gp-reset']();
+        gp.overlay = false; renderGpOverlay();
+      } else if (id === 'timer-overlay') {
         if (timer.done) timerStop();
         else { timer.overlay = false; renderOverlay(); }
       } else if (hold.running) {
@@ -1721,10 +1833,34 @@
     if (document.visibilityState === 'visible') {
       if (timer.running) { wakeOn(); timerTick(); }
       if (hold.running) { wakeOn(); holdTick(); }
+      if (gp.running) { wakeOn(); gpTick(); }
     }
   });
 
   /* ---------- Finish ---------- */
+
+  /** Throws the workout away without saving, after asking. */
+  actions['w-quit'] = async () => {
+    const s = await Store.getActiveSession();
+    if (!s) return;
+    const n = mainSets(s).length;
+    const ok = await confirmSheet({
+      title: 'Quit this workout?',
+      body: n
+        ? `The ${plural(n, 'set')} you logged and any PRs from them will be deleted. This cannot be undone. Tap Finish instead to save it.`
+        : 'Nothing has been logged, so nothing will be lost.',
+      confirmLabel: 'Quit workout',
+      danger: true,
+    });
+    if (!ok) return;
+    await Store.deleteSession(s.id);
+    await recomputeMilestones(s.sets.map((x) => x.exerciseId));
+    timerStop();
+    if (hold.running || hold.result != null) { clearInterval(hold.interval); Object.assign(hold, { running: false, done: false, result: null, overlay: false }); }
+    Object.assign(state, { entry: null, dropDraft: null });
+    await render({ animate: true });
+    toast('Workout deleted');
+  };
 
   actions['w-finish'] = async () => {
     const s = await Store.getActiveSession();
@@ -2376,8 +2512,8 @@
       <div class="list">
         <div class="row"><span class="row-label">RPE slider<small>Starts empty for each set. Slide it to rate 6 to 10.</small></span>
           ${sw('toggle-rpe', s.rpeEnabled, 'RPE slider')}</div>
-        <div class="row wrap"><span class="row-label">Rest timer<small>Timed exercises have their own timer</small></span>
-          ${seg('set-rest-place', rt.enabled ? rt.placement : 'off', [['off', 'Off'], ['panel', 'In log'], ['corner', 'Hourglass']])}</div>
+        <div class="row"><span class="row-label">Rest timer<small>Shows in the set entry. The corner hourglass is always there for a stopwatch or timer.</small></span>
+          ${sw('toggle-rest', rt.enabled, 'Rest timer')}</div>
         ${rt.enabled ? `
         <div class="row sub"><span class="row-label">Start</span>
           ${seg('set-rest-start', rt.autoStart ? 'auto' : 'manual', [['manual', 'Manual'], ['auto', 'After each set']])}</div>
@@ -2434,6 +2570,8 @@
           <span class="row-label">Export data<small>Save everything as a JSON file</small></span>${ICON.chev}</button>
         <button class="row" data-action="import">
           <span class="row-label">Import data<small>Replace everything here with a file you exported</small></span>${ICON.chev}</button>
+        <button class="row" data-action="delete-all">
+          <span class="row-label" style="color:var(--danger)">Delete all data<small>Every workout, PR, weigh-in, exercise and setting</small></span></button>
       </div>
       <p class="group-note">Your data is stored in this browser on this device only. Export a copy now and then.</p>
       <input type="file" id="import-file" accept="application/json,.json" data-change="import-file" hidden>
@@ -2445,6 +2583,24 @@
       </div>
     </section>`;
   }
+
+  actions['delete-all'] = async () => {
+    const ok = await confirmSheet({
+      title: 'Delete all data?',
+      body: 'Every workout, PR, weigh-in, custom exercise, split and setting will be deleted from this phone. This cannot be undone. Export first if you might want it back.',
+      confirmLabel: 'Delete everything',
+      danger: true,
+    });
+    if (!ok) return;
+    timerStop();
+    actions['gp-reset']();
+    await Store.resetAll();
+    Object.assign(state, { entry: null, dropDraft: null, splitDraft: null, startPick: null, nextDismissed: {} });
+    await refresh();
+    applyTheme();
+    go('#log');
+    toast('All data deleted');
+  };
 
   async function saveSettings(patch, message) {
     state.settings = await Store.updateSettings(patch);
@@ -2468,10 +2624,9 @@
     return withThemeTransition(() => saveSettings({ accent: next }), { x: b.left + b.width / 2, y: b.top + b.height / 2 });
   };
   actions['toggle-rpe'] = () => saveSettings({ rpeEnabled: !state.settings.rpeEnabled });
-  actions['set-rest-place'] = (el) => {
-    const v = el.dataset.value;
-    if (v === 'off') timerStop();
-    return saveSettings({ restTimer: v === 'off' ? { enabled: false } : { enabled: true, placement: v } });
+  actions['toggle-rest'] = () => {
+    if (state.settings.restTimer.enabled) timerStop();
+    return saveSettings({ restTimer: { enabled: !state.settings.restTimer.enabled } });
   };
   actions['set-rest-start'] = (el) => saveSettings({ restTimer: { autoStart: el.dataset.value === 'auto' } });
   actions['rest-step'] = (el) => {

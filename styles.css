@@ -660,7 +660,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .dial .caption { fill: var(--muted); font-family: var(--f-ui); font-size: 11px; font-weight: 600; text-anchor: middle; }
 .dial-mini .numeral, .dial-mini .readout, .dial-mini .caption, .dial-mini .tick:not(.major) { display: none; }
 
-#timer-overlay, #hold-overlay { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 24px; background: var(--backdrop); }
+#timer-overlay, #hold-overlay, #gp-overlay { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 24px; background: var(--backdrop); }
 .timer-panel { width: min(100%, 360px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r); padding: 20px 16px 16px; display: grid; gap: 14px; justify-items: center; }
 .timer-panel .dial-big { width: min(78vw, 290px); height: auto; aspect-ratio: 1; max-width: 100%; }
 .timer-panel .title { font-family: var(--f-num); font-size: 22px; font-weight: 700; }
@@ -821,8 +821,12 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 
 /* ---------- Corner timer (hourglass) ---------- */
 /* Sits just above the top-right corner of the set-entry block, so it never covers the Log button. */
-.entry .corner-slot { position: absolute; right: 12px; bottom: calc(100% + 10px); }
-.entry .corner-slot:empty { display: none; }
+/* The corner hourglass floats just above the bottom area (Next card + log window), on the right. */
+.w-foot { position: relative; }
+.w-foot > .corner-slot { position: absolute; right: 12px; bottom: calc(100% + 10px); z-index: 3; }
+.w-foot > .corner-slot:empty { display: none; }
+.w-list { padding-bottom: 62px; }      /* the last set can scroll clear of the hourglass */
+.w-list.empty { border-top: 0; }
 .corner-timer {
   display: inline-flex;
   align-items: center;
@@ -860,6 +864,9 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 
 /* ---------- Hold timer (timed exercises) ---------- */
 #hold-overlay { z-index: 56; }
+#gp-overlay { z-index: 57; }
+.w-top .quit { flex: none; min-height: 36px; padding: 0 4px; font-size: 14px; font-weight: 600; color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { .w-top .quit:hover { color: var(--danger); } }
 .hold-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .hold-row .hold-btn { min-height: 44px; gap: 8px; font-size: 14px; }
 .hold-row .hold-btn.running { grid-column: 1 / -1; }
