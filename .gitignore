@@ -1,3 +1,8 @@
 .claude/settings.local.json
 .DS_Store
 Thumbs.db
+
+# Local development only (kept out of the published app)
+tests.html
+samples.js
+.claude/

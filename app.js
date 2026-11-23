@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.8';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.8.1';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -48,8 +48,6 @@
     sessionTypes: [],
     route: { tab: 'log', parts: [] },
     splitDraft: null,       // the session type being edited
-    devTaps: [],
-    devUnlocked: false,
   };
 
   async function refresh() {
@@ -1714,22 +1712,9 @@
       <input type="file" id="import-file" accept="application/json,.json" data-change="import-file" hidden>
     </section>
 
-    ${state.devUnlocked ? `
-    <section class="group">
-      <h2 class="group-title">Developer</h2>
-      <div class="list">
-        <button class="row" data-action="load-sample">
-          <span class="row-label">Load sample data<small>Nine weeks of Push / Pull / Legs. Replaces your workout history.</small></span>${ICON.chev}</button>
-        <a class="row" href="tests.html"><span class="row-label">Run tests</span>${ICON.chev}</a>
-        <button class="row" data-action="reset-all">
-          <span class="row-label" style="color:var(--danger)">Erase all data</span></button>
-      </div>
-    </section>` : ''}
-
     <section class="group">
       <div class="list">
-        <button class="row" data-action="version-tap">
-          <span class="row-label">Hercules<small>Version ${APP_VERSION}</small></span></button>
+        <div class="row"><span class="row-label">Hercules<small>Version ${APP_VERSION}</small></span></div>
       </div>
     </section>`;
   }
@@ -1753,18 +1738,7 @@
   actions['toggle-schedule'] = () => saveSettings({ schedule: { enabled: !state.settings.schedule.enabled } });
   changes['set-day'] = (el) => saveSettings({ schedule: { days: { [el.dataset.day]: el.value || null } } });
 
-  actions['version-tap'] = () => {
-    const now = Date.now();
-    state.devTaps = state.devTaps.filter((t) => now - t < 3000).concat(now);
-    if (state.devTaps.length >= 5 && !state.devUnlocked) {
-      state.devUnlocked = true;
-      state.devTaps = [];
-      toast('Developer options are on');
-      render({ keepScroll: true });
-    }
-  };
-
-  /* ---------- Export / import / sample / reset ---------- */
+  /* ---------- Export / import ---------- */
 
   actions.export = async () => {
     const data = await Store.exportData();
@@ -1808,36 +1782,6 @@
     applyTheme();
     await render();
     toast(`Imported ${plural(res.sessions, 'session')}`);
-  };
-
-  actions['load-sample'] = async () => {
-    const ok = await confirmSheet({
-      title: 'Load sample data?',
-      body: 'This replaces your sessions, split, milestones and weigh-ins with nine weeks of sample training. Your settings and exercises stay. Export first if you want to keep your history.',
-      confirmLabel: 'Load sample data',
-      danger: true,
-    });
-    if (!ok) return;
-    const base = await Store.exportData();
-    const res = await Store.importData(SampleData.build({ base }));
-    await refresh();
-    await render({ keepScroll: true });
-    toast(`Loaded ${plural(res.sessions, 'sample session')}`);
-  };
-
-  actions['reset-all'] = async () => {
-    const ok = await confirmSheet({
-      title: 'Erase all data?',
-      body: 'Every session, milestone, weigh-in, custom exercise and setting will be deleted. This cannot be undone.',
-      confirmLabel: 'Erase everything',
-      danger: true,
-    });
-    if (!ok) return;
-    await Store.resetAll();
-    await refresh();
-    applyTheme();
-    await render();
-    toast('All data erased');
   };
 
   /* ---------- Split editor ---------- */

@@ -6,7 +6,7 @@
  * cached the first time they load. Workout data is not here: it lives in
  * localStorage via storage.js.
  */
-const VERSION = 'v0.8';
+const VERSION = 'v0.8.1';
 const APP_CACHE = `wt-app-${VERSION}`;
 const FONT_CACHE = 'wt-fonts-v1';
 const APP_FILES = [
@@ -16,7 +16,6 @@ const APP_FILES = [
   './app.js',
   './storage.js',
   './prs.js',
-  './samples.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
