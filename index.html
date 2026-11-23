@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Workout Tracker</title>
+<meta name="description" content="Log sets fast, track PRs and see your training calendar.">
+<meta name="theme-color" content="#F3F5F3">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Workouts">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <main id="view" tabindex="-1"></main>
+  <nav class="tabbar" aria-label="Main">
+    <a href="#log" data-tab="log">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="14" height="14"/><path d="M10 6.5v7M6.5 10h7"/></svg>
+      <span>Log</span>
+    </a>
+    <a href="#calendar" data-tab="calendar">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5"/><path d="M3 8.5h14M7 2.5v4M13 2.5v4"/></svg>
+      <span>Calendar</span>
+    </a>
+    <a href="#prs" data-tab="prs">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 3h8v4a4 4 0 0 1-8 0V3zM10 11v3.5M6.5 17h7M6 5H3.5a2.5 2.5 0 0 0 2.6 2.5M14 5h2.5a2.5 2.5 0 0 1-2.6 2.5"/></svg>
+      <span>PRs</span>
+    </a>
+    <a href="#settings" data-tab="settings">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 6h14M3 14h14"/><rect x="5.5" y="4" width="3" height="4" fill="currentColor" stroke="none"/><rect x="11.5" y="12" width="3" height="4" fill="currentColor" stroke="none"/></svg>
+      <span>Settings</span>
+    </a>
+  </nav>
+</div>
+<div id="sheet-root" hidden></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="storage.js"></script>
+<script src="prs.js"></script>
+<script src="samples.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

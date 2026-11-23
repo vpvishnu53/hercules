@@ -263,9 +263,10 @@
   const sessionSort = (a, b) =>
     a.date < b.date ? -1 : a.date > b.date ? 1 : (a.startedAt || '').localeCompare(b.startedAt || '');
 
+  /** The visible exercise already using this name (any case), or undefined. */
   function nameTaken(d, name, exceptId) {
     const n = name.toLowerCase();
-    return d.exercises.some((e) => !e.archived && e.id !== exceptId && e.name.toLowerCase() === n);
+    return d.exercises.find((e) => !e.archived && e.id !== exceptId && e.name.toLowerCase() === n);
   }
 
   const Store = {
@@ -334,7 +335,8 @@
       return write((d) => {
         const n = cleanName(name);
         assert(n, 'Give the exercise a name.');
-        assert(!nameTaken(d, n), `You already have an exercise called "${n}".`);
+        const clash = nameTaken(d, n);
+        assert(!clash, `You already have an exercise called "${clash && clash.name}".`);
         assert(MUSCLE_GROUPS.includes(group), 'Unknown muscle group.');
         const ex = { id: newId('ex'), name: n, group, custom: true, archived: false };
         d.exercises.push(ex);
@@ -349,7 +351,8 @@
         if (name !== undefined) {
           const n = cleanName(name);
           assert(n, 'Give the exercise a name.');
-          assert(!nameTaken(d, n, id), `You already have an exercise called "${n}".`);
+          const clash = nameTaken(d, n, id);
+          assert(!clash, `You already have an exercise called "${clash && clash.name}".`);
           ex.name = n;
         }
         if (group !== undefined) {
@@ -364,7 +367,7 @@
     setExerciseArchived(id, archived) {
       return write((d) => {
         const ex = findExercise(d, id);
-        if (!archived) assert(!nameTaken(d, ex.name, id), `You already have an exercise called "${ex.name}".`);
+        if (!archived) assert(!nameTaken(d, ex.name, id), `You already have another exercise called "${ex.name}". Rename one first.`);
         ex.archived = !!archived;
         return ex;
       });
@@ -379,8 +382,8 @@
       return write((d) => {
         const n = cleanName(name);
         assert(n, 'Give the session a name, like Push or Legs.');
-        assert(!d.sessionTypes.some((t) => t.id !== id && t.name.toLowerCase() === n.toLowerCase()),
-          `You already have a session called "${n}".`);
+        const clash = d.sessionTypes.find((t) => t.id !== id && t.name.toLowerCase() === n.toLowerCase());
+        assert(!clash, `You already have a session called "${clash && clash.name}".`);
         const cleanItems = items.map((it) => {
           findExercise(d, it.exerciseId);
           const t = Number(it.targetSets);
