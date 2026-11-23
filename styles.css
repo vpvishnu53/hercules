@@ -660,7 +660,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .dial .caption { fill: var(--muted); font-family: var(--f-ui); font-size: 11px; font-weight: 600; text-anchor: middle; }
 .dial-mini .numeral, .dial-mini .readout, .dial-mini .caption, .dial-mini .tick:not(.major) { display: none; }
 
-#timer-overlay { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 24px; background: var(--backdrop); }
+#timer-overlay, #hold-overlay { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 24px; background: var(--backdrop); }
 .timer-panel { width: min(100%, 360px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r); padding: 20px 16px 16px; display: grid; gap: 14px; justify-items: center; }
 .timer-panel .dial-big { width: min(78vw, 290px); height: auto; aspect-ratio: 1; max-width: 100%; }
 .timer-panel .title { font-family: var(--f-num); font-size: 22px; font-weight: 700; }
@@ -857,6 +857,21 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .plates-svg .plate { fill: var(--fg); }
 .plates-svg .plate-label { fill: var(--muted); font-family: var(--f-num); font-size: 10px; font-weight: 600; text-anchor: middle; }
 .plates-line { margin: 4px 0; font-size: 15px; }
+
+/* ---------- Hold timer (timed exercises) ---------- */
+#hold-overlay { z-index: 56; }
+.hold-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.hold-row .hold-btn { min-height: 44px; gap: 8px; font-size: 14px; }
+.hold-row .hold-btn.running { grid-column: 1 / -1; }
+.hold-btn .hourglass { width: 15px; height: 20px; }
+.hold-btn svg:not(.hourglass) { width: 18px; height: 18px; }
+.hold-btn.running .hourglass .glass, .hold-btn.running .hourglass .cap { stroke: currentColor; }
+.hold-btn.running .hourglass .sand { fill: currentColor; opacity: 0.8; }
+.reps.time output { font-size: 24px; }
+.timer-panel .panel-ex { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: -6px; }
+.timer-panel .btns.two { grid-template-columns: 1fr 1fr; }
+.rest-start { gap: 6px; }
+.rest-start .hourglass { width: 13px; height: 17px; }
 
 /* ---------- Timer panel tabs ---------- */
 .timer-tabs { align-self: stretch; display: grid; grid-template-columns: 1fr 1fr; }

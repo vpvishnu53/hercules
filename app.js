@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.16';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.17';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1032,10 +1032,10 @@
             </div>
           </div>
           ${timed ? `<div>
-            <span class="lab">Time <em>tap to time it</em></span>
+            <span class="lab">Time <em>target for the timer</em></span>
             <div class="reps time">
               <button data-action="secs-step" data-step="-5" aria-label="5 seconds less">−</button>
-              <button class="time-out num" data-action="time-it" aria-label="Time it with the stopwatch"><output id="secs-out" aria-live="polite">${fmtDuration(e.seconds)}</output></button>
+              <output id="secs-out" class="num" aria-live="polite">${fmtDuration(e.seconds)}</output>
               <button data-action="secs-step" data-step="5" aria-label="5 seconds more">+</button>
             </div>
           </div>` : `<div>
@@ -1047,6 +1047,7 @@
             </div>
           </div>`}
         </div>
+        ${timed ? `<div data-hold-slot>${holdButtonsHtml(e)}</div>` : ''}
         ${rpe}
         <div class="note-row">${e.showNote
           ? `<label class="visually-hidden" for="note-in">Note for this set</label>
@@ -1082,17 +1083,8 @@
     e.seconds = Math.min(86400, Math.max(1, e.seconds + Number(el.dataset.step)));
     $('#secs-out').textContent = fmtDuration(e.seconds);
     bump($('#secs-out'));
-  };
-  /** Opens the big clock on the Stopwatch tab and starts it (if it isn't running already). */
-  actions['time-it'] = () => {
-    timer.tab = 'watch';
-    if (!watch.running) {
-      Object.assign(watch, { running: true, startAt: Date.now(), acc: 0 });
-      ensureTicking();
-      wakeOn();
-    }
-    timer.overlay = true;
-    refreshRestUi();
+    const target = $('[data-hold-target]');
+    if (target) target.textContent = fmtDuration(e.seconds);
   };
   actions['w-sign'] = () => {
     const e = state.entry;
@@ -1371,27 +1363,20 @@
   }
   actions['pr-dismiss'] = () => { clearTimeout(prTimer); $('#pr-banner').innerHTML = ''; };
 
-  /* ---------- Timers: rest countdown and stopwatch ---------- */
+  /* ---------- Timers ---------- */
   /*
-   * Where the timer lives is a setting (restTimer.placement):
-   *   'panel'  a row at the top of the set-entry block (the original layout)
-   *   'corner' a small hourglass in the bottom-right corner above the entry block
-   * Both open the same timer panel, which has two tabs: Rest and Stopwatch
-   * (the stopwatch is for timed holds such as planks; its time can go into the set note).
+   * Two independent clocks, each with its own big analog clock panel:
+   *  - Rest timer (Settings → Timer): a countdown between sets, shown as a row
+   *    above the set entry ('panel') or as an hourglass button ('corner').
+   *  - Hold timer, for timed exercises (planks, hangs): a countdown to a target
+   *    time (hourglass) or a stopwatch. Its result becomes the set's time.
+   * Starting, stopping or finishing one never changes the other.
    */
 
-  const timer = { running: false, done: false, startAt: 0, endAt: 0, total: 0, interval: null, wake: null, overlay: false, tab: 'rest', nextSec: 0 };
-  const watch = { running: false, startAt: 0, acc: 0 };
+  const timer = { running: false, done: false, startAt: 0, endAt: 0, total: 0, interval: null, wake: null, overlay: false, nextSec: 0 };
+  const hold = { mode: 'down', running: false, done: false, startAt: 0, endAt: 0, target: 0, acc: 0, result: null, overlay: false, interval: null, exerciseId: null };
 
-  const watchMs = () => watch.acc + (watch.running ? Date.now() - watch.startAt : 0);
-  const watchText = () => {
-    const ms = watchMs();
-    const sec = Math.floor(ms / 1000);
-    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
-  };
-  const watchShort = () => fmtDuration(Math.floor(watchMs() / 1000));
-
-  /** Analog dial. mode 'rest': the arc shows rest left. mode 'watch': the arc fills once a minute. */
+  /** Analog dial. mode 'rest' / 'down': the arc shows time left. mode 'up': the arc fills once a minute. */
   function dialSvg(cls, mode = 'rest') {
     const parts = [];
     for (let i = 0; i < 60; i++) {
@@ -1406,39 +1391,53 @@
       const a = (n * 6 * Math.PI) / 180;
       parts.push(`<text class="numeral" x="${(100 + 68 * Math.sin(a)).toFixed(1)}" y="${(100 - 68 * Math.cos(a)).toFixed(1)}">${n}</text>`);
     }
+    const caption = { rest: 'rest left', down: 'left to hold', up: 'elapsed' }[mode];
     return `<svg class="dial ${cls}" viewBox="0 0 200 200" aria-hidden="true" data-dial="${mode}">
       <circle class="face" cx="100" cy="100" r="99"/>
       <circle class="track" cx="100" cy="100" r="94"/>
       <circle class="arc" cx="100" cy="100" r="94" pathLength="100" stroke-dasharray="100 100" transform="rotate(-90 100 100)" data-arc/>
       ${parts.join('')}
       <text class="readout" x="100" y="128" data-readout></text>
-      <text class="caption" x="100" y="152">${mode === 'watch' ? 'elapsed' : 'rest left'}</text>
+      <text class="caption" x="100" y="152">${caption}</text>
       <g data-hand><line class="hand" x1="100" y1="114" x2="100" y2="16"/></g>
       <rect class="hub" x="95" y="95" width="10" height="10"/>
       <rect class="hub-in" x="98.5" y="98.5" width="3" height="3"/>
     </svg>`;
   }
 
-  /** Hourglass with sand in the theme colour; paintTimer() moves the sand. */
-  function hourglassSvg() {
-    return `<svg class="hourglass" viewBox="0 0 24 32" aria-hidden="true">
+  /** Hourglass with sand in the theme colour; paintTimer() moves the sand. uid keeps clip ids unique. */
+  function hourglassSvg(uid) {
+    return `<svg class="hourglass" viewBox="0 0 24 32" aria-hidden="true" data-hourglass="${uid}">
       <defs>
-        <clipPath id="hg-top"><path d="M7 4h10v2c0 4.5-3 7.5-5 9.5C10 13.5 7 10.5 7 6z"/></clipPath>
-        <clipPath id="hg-bot"><path d="M12 16.5c2 2 5 5 5 9.5v2H7v-2c0-4.5 3-7.5 5-9.5z"/></clipPath>
+        <clipPath id="${uid}-top"><path d="M7 4h10v2c0 4.5-3 7.5-5 9.5C10 13.5 7 10.5 7 6z"/></clipPath>
+        <clipPath id="${uid}-bot"><path d="M12 16.5c2 2 5 5 5 9.5v2H7v-2c0-4.5 3-7.5 5-9.5z"/></clipPath>
       </defs>
-      <rect class="sand" clip-path="url(#hg-top)" x="6" width="12" y="4" height="11.5" data-sand-top/>
-      <rect class="sand" clip-path="url(#hg-bot)" x="6" width="12" y="28" height="0" data-sand-bot/>
+      <rect class="sand" clip-path="url(#${uid}-top)" x="6" width="12" y="4" height="11.5" data-sand-top/>
+      <rect class="sand" clip-path="url(#${uid}-bot)" x="6" width="12" y="28" height="0" data-sand-bot/>
       <line class="stream" x1="12" y1="15.5" x2="12" y2="27.5"/>
       <path class="glass" d="M6 3h12v3c0 5-4 8-5.5 10C14 18 18 21 18 26v3H6v-3c0-5 4-8 5.5-10C10 14 6 11 6 6z"/>
       <rect class="cap" x="3" y="1" width="18" height="2.2"/>
       <rect class="cap" x="3" y="28.8" width="18" height="2.2"/>
     </svg>`;
   }
+  /** sandLeft: 1 = top bulb full, 0 = all sand at the bottom. */
+  function setSand(svg, sandLeft) {
+    if (!svg) return;
+    const topY = 4 + (1 - sandLeft) * 11.5;
+    svg.querySelector('[data-sand-top]').setAttribute('y', topY.toFixed(2));
+    svg.querySelector('[data-sand-top]').setAttribute('height', (15.5 - topY).toFixed(2));
+    const botH = (1 - sandLeft) * 11.5;
+    svg.querySelector('[data-sand-bot]').setAttribute('y', (28 - botH).toFixed(2));
+    svg.querySelector('[data-sand-bot]').setAttribute('height', botH.toFixed(2));
+  }
+
+  const ICON_WATCH = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="11.5" r="6.5"/><path d="M10 11.5V8M8 2.5h4M15.5 5.5l1.2-1.2"/></svg>';
+
+  /* ----- Rest timer ----- */
 
   const timerLeft = () => Math.max(0, timer.endAt - Date.now());
   const timerLeftText = () => fmtDuration(Math.ceil(timerLeft() / 1000));
   const restSecs = () => timer.nextSec || state.settings.restTimer.durationSec;
-  const ICON_WATCH = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="11.5" r="6.5"/><path d="M10 11.5V8M8 2.5h4M15.5 5.5l1.2-1.2"/></svg>';
 
   /** The row at the top of the entry block (placement 'panel'). */
   function restRowHtml() {
@@ -1446,7 +1445,7 @@
     if (!rt.enabled || rt.placement === 'corner') return '';
     if (timer.running || timer.done) {
       return `<div class="rest-row${timer.done ? ' done' : ''}">
-        <button data-action="timer-open" data-tab="rest" aria-label="Show rest timer">${dialSvg('dial-mini')}</button>
+        <button data-action="timer-open" aria-label="Show rest timer">${dialSvg('dial-mini')}</button>
         <span class="label">${timer.done ? 'Rest over' : 'Resting'}<b data-timer-text>${timer.done ? '0:00' : timerLeftText()}</b></span>
         ${timer.done
           ? '<button class="btn btn-secondary btn-sm" data-action="timer-stop">Dismiss</button>'
@@ -1454,59 +1453,104 @@
              <button class="btn btn-secondary btn-sm" data-action="timer-stop">Skip</button>`}
       </div>`;
     }
-    if (watch.running || watch.acc) {
-      return `<div class="rest-row">
-        <button class="icon-btn" data-action="timer-open" data-tab="watch" aria-label="Show stopwatch">${ICON_WATCH}</button>
-        <span class="label">Stopwatch<b data-watch-text>${watchShort()}</b></span>
-        <button class="btn btn-secondary btn-sm" data-action="timer-open" data-tab="watch">Open</button>
-        ${watch.running ? '<button class="btn btn-secondary btn-sm" data-action="watch-stop">Stop</button>'
-          : '<button class="btn btn-secondary btn-sm" data-action="watch-reset">Clear</button>'}
-      </div>`;
-    }
     return `<div class="rest-row"><span class="label">Rest timer<b>${fmtDuration(rt.durationSec)}</b></span>
-      <button class="icon-btn" data-action="timer-open" data-tab="watch" aria-label="Stopwatch">${ICON_WATCH}</button>
-      <button class="btn btn-secondary btn-sm" data-action="timer-start">Start rest</button></div>`;
+      <button class="btn btn-secondary btn-sm rest-start" data-action="timer-start">${hourglassSvg('hg-rest-row')}Start rest</button></div>`;
   }
 
   /** The hourglass button (placement 'corner'), shown above the entry block. */
   function cornerTimerHtml() {
     const rt = state.settings.restTimer;
     if (!rt.enabled || rt.placement !== 'corner') return '';
-    return `<button class="corner-timer${timer.done ? ' done' : ''}${timer.running || watch.running ? ' running' : ''}"
-      data-action="timer-open" data-tab="${watch.running && !timer.running ? 'watch' : 'rest'}" aria-label="Timer">
-      ${hourglassSvg()}<span class="t num" data-corner-text></span></button>`;
+    return `<button class="corner-timer${timer.done ? ' done' : ''}${timer.running ? ' running' : ''}"
+      data-action="${timer.running || timer.done ? 'timer-open' : 'timer-start'}" aria-label="${timer.running ? 'Show rest timer' : 'Start rest'}">
+      ${hourglassSvg('hg-corner')}<span class="t num" data-corner-text></span></button>`;
   }
 
+  /* ----- Hold timer (timed exercises) ----- */
+
+  const holdLeftMs = () => Math.max(0, hold.endAt - Date.now());
+  const holdElapsedMs = () => (hold.mode === 'down'
+    ? (hold.running ? hold.target * 1000 - holdLeftMs() : (hold.result || 0) * 1000)
+    : hold.acc + (hold.running ? Date.now() - hold.startAt : 0));
+  const holdText = () => {
+    if (hold.mode === 'down' && hold.running) return fmtDuration(Math.ceil(holdLeftMs() / 1000));
+    if (!hold.running && hold.result != null) return fmtDuration(hold.result);
+    const ms = holdElapsedMs();
+    const sec = Math.floor(ms / 1000);
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
+  };
+
+  /** The two buttons under a timed exercise's Time box. */
+  function holdButtonsHtml(e) {
+    if (hold.running && hold.exerciseId === e.exerciseId) {
+      return `<div class="hold-row"><button class="btn btn-primary hold-btn running" data-action="hold-open">
+        ${hold.mode === 'down' ? hourglassSvg('hg-hold') : ICON_WATCH}<span>${hold.mode === 'down' ? 'Holding' : 'Timing'} · <b class="num" data-hold-text>${holdText()}</b></span></button></div>`;
+    }
+    return `<div class="hold-row">
+      <button class="btn btn-secondary hold-btn" data-action="hold-start" data-mode="down">${hourglassSvg('hg-hold')}<span>Timer <b class="num" data-hold-target>${fmtDuration(e.seconds)}</b></span></button>
+      <button class="btn btn-secondary hold-btn" data-action="hold-start" data-mode="up">${ICON_WATCH}<span>Stopwatch</span></button>
+    </div>`;
+  }
+
+  function renderHoldOverlay() {
+    const ov = $('#hold-overlay');
+    if (!hold.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
+    ov.hidden = false;
+    const finished = !hold.running && hold.result != null;
+    const name = exerciseName(hold.exerciseId);
+    const title = finished
+      ? (hold.done ? `Done · ${fmtDuration(hold.result)}` : `Held ${fmtDuration(hold.result)}`)
+      : hold.mode === 'down' ? `Hold for ${fmtDuration(hold.target)}` : 'Stopwatch';
+    ov.innerHTML = `<div class="timer-panel${hold.done ? ' done' : ''}" role="dialog" aria-label="${esc(name)} timer">
+      <span class="panel-ex">${esc(name)}</span>
+      ${dialSvg('dial-big', hold.mode)}
+      <span class="title">${esc(title)}</span>
+      ${finished
+        ? `<button class="btn btn-primary btn-block" data-action="hold-log">Log ${fmtDuration(hold.result)}</button>
+           <div class="btns two"><button class="btn btn-secondary" data-action="hold-again">Again</button>
+           <button class="btn btn-secondary" data-action="hold-close">Close</button></div>`
+        : `<button class="btn btn-primary btn-block" data-action="hold-stop">Stop</button>
+           <button class="text-btn" data-action="hold-hide">Hide</button>`}
+    </div>`;
+  }
+
+  /* ----- Painting both ----- */
+
   function paintTimer() {
+    // Rest
     const left = timerLeft();
-    const elapsed = (Date.now() - timer.startAt) / 1000;
+    const restElapsed = (Date.now() - timer.startAt) / 1000;
     const restFrac = timer.done ? 0 : timer.running ? Math.min(1, left / (timer.total * 1000)) : 1;
-    const wsec = watchMs() / 1000;
+    // Hold
+    const hElapsed = holdElapsedMs() / 1000;
+    const holdFrac = hold.mode === 'down'
+      ? (hold.running ? Math.min(1, holdLeftMs() / (hold.target * 1000)) : (hold.done ? 0 : 1))
+      : (hElapsed % 60) / 60;
     $$('[data-dial]').forEach((svg) => {
-      const isWatch = svg.dataset.dial === 'watch';
-      const frac = isWatch ? (wsec % 60) / 60 : restFrac;
+      const mode = svg.dataset.dial;
+      let frac;
+      let angle;
+      let text;
+      if (mode === 'rest') {
+        frac = restFrac;
+        angle = timer.running ? (restElapsed % 60) * 6 : 0;
+        text = timer.done ? '0:00' : timer.running ? timerLeftText() : fmtDuration(restSecs());
+      } else {
+        frac = holdFrac;
+        angle = (hElapsed % 60) * 6;
+        text = holdText();
+      }
       svg.querySelector('[data-arc]').setAttribute('stroke-dasharray', `${(frac * 100).toFixed(2)} 100`);
-      const angle = isWatch ? (wsec % 60) * 6 : (timer.done || !timer.running ? 0 : (elapsed % 60) * 6);
       svg.querySelector('[data-hand]').setAttribute('transform', `rotate(${angle.toFixed(1)} 100 100)`);
-      svg.querySelector('[data-readout]').textContent = isWatch ? watchText()
-        : timer.done ? '0:00' : timer.running ? timerLeftText() : fmtDuration(restSecs());
+      svg.querySelector('[data-readout]').textContent = text;
     });
     $$('[data-timer-text]').forEach((el) => { el.textContent = timer.done ? '0:00' : timerLeftText(); });
-    $$('[data-watch-text]').forEach((el) => { el.textContent = watchShort(); });
-    // Hourglass: rest drains the top bulb over the rest time; the stopwatch trickles once a minute.
-    const hg = $('.corner-timer');
-    if (hg) {
-      const usingWatch = !timer.running && !timer.done && (watch.running || watch.acc > 0);
-      const sandLeft = usingWatch ? 1 - (wsec % 60) / 60 : restFrac;
-      const topY = 4 + (1 - sandLeft) * 11.5;
-      hg.querySelector('[data-sand-top]').setAttribute('y', topY.toFixed(2));
-      hg.querySelector('[data-sand-top]').setAttribute('height', (15.5 - topY).toFixed(2));
-      const botH = (1 - sandLeft) * 11.5;
-      hg.querySelector('[data-sand-bot]').setAttribute('y', (28 - botH).toFixed(2));
-      hg.querySelector('[data-sand-bot]').setAttribute('height', botH.toFixed(2));
-      hg.querySelector('[data-corner-text]').textContent = timer.running ? timerLeftText()
-        : timer.done ? '0:00' : usingWatch ? watchShort() : '';
-    }
+    $$('[data-hold-text]').forEach((el) => { el.textContent = holdText(); });
+    // Rest hourglasses drain over the rest; the hold hourglass drains over the hold (or trickles each minute).
+    $$('[data-hourglass="hg-corner"], [data-hourglass="hg-rest-row"]').forEach((svg) => setSand(svg, restFrac));
+    $$('[data-hourglass="hg-hold"]').forEach((svg) => setSand(svg, hold.running ? (hold.mode === 'down' ? holdFrac : 1 - holdFrac) : 1));
+    const t = $('[data-corner-text]');
+    if (t) t.textContent = timer.running ? timerLeftText() : timer.done ? '0:00' : '';
   }
 
   function refreshRestUi() {
@@ -1514,57 +1558,41 @@
     if (slot) slot.innerHTML = restRowHtml();
     const corner = $('[data-corner-slot]');
     if (corner) corner.innerHTML = cornerTimerHtml();
+    const holdSlot = $('[data-hold-slot]');
+    if (holdSlot && state.entry) holdSlot.innerHTML = holdButtonsHtml(state.entry);
     renderOverlay();
+    renderHoldOverlay();
     paintTimer();
   }
 
+  /** Big clock for the rest timer. */
   function renderOverlay() {
     const ov = $('#timer-overlay');
     if (!timer.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
-    const tab = timer.done ? 'rest' : timer.tab;
     ov.hidden = false;
-    let body;
-    if (tab === 'rest') {
-      let controls;
-      if (timer.done) {
-        controls = '<button class="btn btn-primary btn-block" data-action="timer-stop">Back to it</button>';
-      } else if (timer.running) {
-        controls = `<div class="btns">
-            <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
-            <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
-            <button class="btn btn-secondary" data-action="timer-stop">Skip</button>
-          </div>`;
-      } else {
-        controls = `<div class="btns">
-            <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
-            <button class="btn btn-primary" data-action="timer-start">Start</button>
-            <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
-          </div>`;
-      }
-      body = `${dialSvg('dial-big', 'rest')}
-        <span class="title">${timer.done ? 'Rest over' : timer.running ? 'Resting' : 'Rest'}</span>${controls}`;
+    let controls;
+    if (timer.done) {
+      controls = '<button class="btn btn-primary btn-block" data-action="timer-stop">Back to it</button>';
+    } else if (timer.running) {
+      controls = `<div class="btns">
+          <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
+          <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
+          <button class="btn btn-secondary" data-action="timer-stop">Skip</button>
+        </div>
+        <button class="text-btn" data-action="timer-hide">Hide</button>`;
     } else {
-      const has = watch.running || watch.acc > 0;
-      const controls = watch.running
-        ? `<button class="btn btn-secondary" data-action="watch-reset">Reset</button>
-           <button class="btn btn-primary" data-action="watch-stop">Stop</button>
-           <button class="btn btn-secondary" disabled>To note</button>`
-        : `<button class="btn btn-secondary" data-action="watch-reset" ${has ? '' : 'disabled'}>Reset</button>
-           <button class="btn btn-primary" data-action="watch-start">${has ? 'Resume' : 'Start'}</button>
-           ${state.entry && state.activeSession && isTimedEx(state.entry.exerciseId)
-             ? `<button class="btn btn-secondary" data-action="watch-use" ${has ? '' : 'disabled'}>Use time</button>`
-             : `<button class="btn btn-secondary" data-action="watch-note" ${has && state.entry && state.activeSession ? '' : 'disabled'}>To note</button>`}`;
-      body = `${dialSvg('dial-big', 'watch')}
-        <span class="title">Stopwatch</span>
-        <div class="btns">${controls}</div>`;
+      controls = `<div class="btns">
+          <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
+          <button class="btn btn-primary" data-action="timer-start">Start</button>
+          <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
+        </div>
+        <button class="text-btn" data-action="timer-hide">Close</button>`;
     }
-    ov.innerHTML = `<div class="timer-panel${timer.done ? ' done' : ''}" role="dialog" aria-label="Timer">
-      ${timer.done ? '' : `<div class="seg timer-tabs" role="group">
-        <button data-action="timer-tab" data-tab="rest" aria-pressed="${tab === 'rest'}">Rest</button>
-        <button data-action="timer-tab" data-tab="watch" aria-pressed="${tab === 'watch'}">Stopwatch</button>
-      </div>`}
-      ${body}
-      ${timer.done ? '' : '<button class="text-btn" data-action="timer-hide">Hide</button>'}
+    ov.innerHTML = `<div class="timer-panel${timer.done ? ' done' : ''}" role="dialog" aria-label="Rest timer">
+      <span class="panel-ex">Rest</span>
+      ${dialSvg('dial-big', 'rest')}
+      <span class="title">${timer.done ? 'Rest over' : timer.running ? 'Resting' : 'Rest'}</span>
+      ${controls}
     </div>`;
   }
 
@@ -1572,26 +1600,23 @@
     try { if ('wakeLock' in navigator && !timer.wake) timer.wake = await navigator.wakeLock.request('screen'); } catch (_) { /* not allowed */ }
   }
   function wakeOff() {
-    if (timer.wake && !timer.running && !watch.running) { timer.wake.release().catch(() => {}); timer.wake = null; }
-  }
-  function ensureTicking() {
-    clearInterval(timer.interval);
-    if (timer.running || watch.running) timer.interval = setInterval(timerTick, watch.running ? 100 : 200);
+    if (timer.wake && !timer.running && !hold.running) { timer.wake.release().catch(() => {}); timer.wake = null; }
   }
 
-  /** Starting a rest opens the big clock; it stays open until you close it. */
+  /* ----- Rest timer actions ----- */
+
+  /** Starting a rest opens its big clock; it stays open until you close it. */
   function timerStart(sec) {
-    Object.assign(timer, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + sec * 1000, total: sec, nextSec: 0, overlay: true, tab: 'rest' });
-    ensureTicking();
+    Object.assign(timer, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + sec * 1000, total: sec, nextSec: 0, overlay: true });
+    clearInterval(timer.interval);
+    timer.interval = setInterval(timerTick, 200);
     wakeOn();
     refreshRestUi();
   }
   function timerTick() {
     if (timer.running && timerLeft() <= 0) {
-      timer.running = false;
-      timer.done = true;
-      timer.overlay = true;
-      ensureTicking();
+      Object.assign(timer, { running: false, done: true, overlay: true });
+      clearInterval(timer.interval);
       if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
       setTimeout(wakeOff, 15000);
       refreshRestUi();
@@ -1601,16 +1626,15 @@
   }
   function timerStop() {
     Object.assign(timer, { running: false, done: false, overlay: false, nextSec: 0 });
-    ensureTicking();
+    clearInterval(timer.interval);
     wakeOff();
     refreshRestUi();
   }
 
   actions['timer-start'] = () => timerStart(restSecs());
   actions['timer-stop'] = () => timerStop();
-  actions['timer-open'] = (el) => { timer.overlay = true; timer.tab = el.dataset.tab || 'rest'; renderOverlay(); paintTimer(); };
+  actions['timer-open'] = () => { timer.overlay = true; renderOverlay(); paintTimer(); };
   actions['timer-hide'] = () => { timer.overlay = false; renderOverlay(); };
-  actions['timer-tab'] = (el) => { timer.tab = el.dataset.tab; renderOverlay(); paintTimer(); };
   actions['timer-add'] = (el) => {
     const d = Number(el.dataset.step);
     if (!timer.running) {                       // before starting: adjust this rest only
@@ -1622,57 +1646,81 @@
     timer.total = Math.max(1, timer.total + d);
     paintTimer();
   };
-  actions['watch-start'] = () => {
-    Object.assign(watch, { running: true, startAt: Date.now() });
-    Object.assign(timer, { overlay: true, tab: 'watch' });
-    ensureTicking();
+
+  /* ----- Hold timer actions ----- */
+
+  function holdTick() {
+    if (hold.running && hold.mode === 'down' && holdLeftMs() <= 0) {
+      Object.assign(hold, { running: false, done: true, result: hold.target, overlay: true });
+      clearInterval(hold.interval);
+      if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 600]);
+      fillHoldResult();
+      setTimeout(wakeOff, 15000);
+      refreshRestUi();
+      return;
+    }
+    paintTimer();
+  }
+  /** The result goes into the set's Time box, ready to log. */
+  function fillHoldResult() {
+    if (state.entry && state.entry.exerciseId === hold.exerciseId && hold.result) {
+      state.entry.seconds = hold.result;
+      const out = $('#secs-out');
+      if (out) out.textContent = fmtDuration(hold.result);
+    }
+  }
+  function holdStart(mode) {
+    const e = state.entry;
+    Object.assign(hold, {
+      mode, running: true, done: false, result: null, overlay: true, exerciseId: e.exerciseId,
+      startAt: Date.now(), acc: 0, target: e.seconds, endAt: Date.now() + e.seconds * 1000,
+    });
+    clearInterval(hold.interval);
+    hold.interval = setInterval(holdTick, 100);
     wakeOn();
     refreshRestUi();
-  };
-  actions['watch-stop'] = () => {
-    if (watch.running) Object.assign(watch, { running: false, acc: watch.acc + (Date.now() - watch.startAt) });
-    ensureTicking();
+  }
+  actions['hold-start'] = (el) => holdStart(el.dataset.mode);
+  actions['hold-open'] = () => { hold.overlay = true; renderHoldOverlay(); paintTimer(); };
+  actions['hold-hide'] = () => { hold.overlay = false; renderHoldOverlay(); };
+  actions['hold-stop'] = () => {
+    if (!hold.running) return;
+    const sec = Math.max(1, Math.round(holdElapsedMs() / 1000));
+    Object.assign(hold, { running: false, done: false, result: sec, acc: sec * 1000 });
+    clearInterval(hold.interval);
+    fillHoldResult();
     wakeOff();
     refreshRestUi();
   };
-  actions['watch-reset'] = () => {
-    Object.assign(watch, { running: false, startAt: 0, acc: 0 });
-    ensureTicking();
-    wakeOff();
+  actions['hold-again'] = () => holdStart(hold.mode);
+  actions['hold-close'] = () => {
+    Object.assign(hold, { overlay: false, done: false, result: null });
     refreshRestUi();
   };
-  /** Timed exercise: the stopwatch time becomes the set's time, ready to log. */
-  actions['watch-use'] = async () => {
-    if (!state.entry) return;
-    const sec = Math.max(1, Math.round(watchMs() / 1000));
-    state.entry.seconds = sec;
-    Object.assign(watch, { running: false, startAt: 0, acc: 0 });
-    timer.overlay = false;
-    ensureTicking();
-    wakeOff();
-    await render({ keepScroll: true });
-    refreshRestUi();
-    toast(`Time set to ${fmtDuration(sec)}. Tap Log set to save it.`);
+  actions['hold-log'] = async () => {
+    fillHoldResult();
+    Object.assign(hold, { overlay: false, done: false, result: null });
+    renderHoldOverlay();
+    await actions['log-set']();
   };
-  /** Puts the stopwatch time into the note of the set being entered, e.g. "Held 0:45". */
-  actions['watch-note'] = async () => {
-    if (!state.entry) return;
-    const text = `Held ${watchShort()}`;
-    state.entry.note = state.entry.note ? `${state.entry.note} · ${text}` : text;
-    state.entry.showNote = true;
-    timer.overlay = false;
-    renderOverlay();
-    await render({ keepScroll: true });
-    toast(`Added "${text}" to the note`);
-  };
-  $('#timer-overlay').addEventListener('click', (ev) => {
-    if (ev.target.id !== 'timer-overlay') return;
-    if (timer.done) timerStop();
-    else { timer.overlay = false; renderOverlay(); }
-  });
+
+  for (const id of ['timer-overlay', 'hold-overlay']) {
+    $(`#${id}`).addEventListener('click', (ev) => {
+      if (ev.target.id !== id) return;
+      if (id === 'timer-overlay') {
+        if (timer.done) timerStop();
+        else { timer.overlay = false; renderOverlay(); }
+      } else if (hold.running) {
+        hold.overlay = false; renderHoldOverlay();
+      } else {
+        actions['hold-close']();
+      }
+    });
+  }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      if (timer.running || watch.running) { wakeOn(); timerTick(); }
+      if (timer.running) { wakeOn(); timerTick(); }
+      if (hold.running) { wakeOn(); holdTick(); }
     }
   });
 
@@ -2138,6 +2186,7 @@
       p.weight = null;
     }
 
+    if (p.view === 'weight' && isTimedEx(p.exerciseId)) p.view = 'reps';   // timed: longest hold is what matters
     const viewSelect = `<div class="field"><label for="pr-view">Show</label>
       <span class="select-wrap"><select class="select" id="pr-view" data-change="pr-view">
         ${[['all', 'All milestones'], ['weight', 'Weight PRs'], ['reps', 'Rep / time PRs'], ['bodyweight', 'Bodyweight']].map(([v, l]) =>
@@ -2274,7 +2323,12 @@
   }
 
   changes['pr-view'] = (el) => { state.prs.view = el.value; state.prs.showAll = false; return render({ keepScroll: true }); };
-  changes['pr-ex'] = (el) => { state.prs.exerciseId = el.value; state.prs.weight = null; return render({ keepScroll: true }); };
+  changes['pr-ex'] = (el) => {
+    state.prs.exerciseId = el.value;
+    state.prs.weight = null;
+    if (isTimedEx(el.value) && state.prs.view === 'weight') state.prs.view = 'reps';
+    return render({ keepScroll: true });
+  };
   changes['pr-w'] = (el) => { state.prs.weight = el.value; return render({ keepScroll: true }); };
   actions['ms-more'] = () => { state.prs.showAll = true; return render({ keepScroll: true }); };
 
@@ -2322,8 +2376,8 @@
       <div class="list">
         <div class="row"><span class="row-label">RPE slider<small>Starts empty for each set. Slide it to rate 6 to 10.</small></span>
           ${sw('toggle-rpe', s.rpeEnabled, 'RPE slider')}</div>
-        <div class="row wrap"><span class="row-label">Timer<small>Rest countdown and stopwatch</small></span>
-          ${seg('set-rest-place', rt.enabled ? rt.placement : 'off', [['off', 'Off'], ['panel', 'In log'], ['corner', 'Corner']])}</div>
+        <div class="row wrap"><span class="row-label">Rest timer<small>Timed exercises have their own timer</small></span>
+          ${seg('set-rest-place', rt.enabled ? rt.placement : 'off', [['off', 'Off'], ['panel', 'In log'], ['corner', 'Hourglass']])}</div>
         ${rt.enabled ? `
         <div class="row sub"><span class="row-label">Start</span>
           ${seg('set-rest-start', rt.autoStart ? 'auto' : 'manual', [['manual', 'Manual'], ['auto', 'After each set']])}</div>
