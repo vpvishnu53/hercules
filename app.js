@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.15';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.16';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -265,6 +265,8 @@
     }
     if (token !== renderToken) return;          // a newer render started
     const view = $('#view');
+    const inner = {};                            // scroll of inner lists, e.g. the session log
+    $$('[data-keep-scroll]', view).forEach((el) => { inner[el.dataset.keepScroll] = el.scrollTop; });
     view.classList.remove(...ENTER_CLASSES);     // in-place updates never animate
     Object.assign(view.style, { transition: '', transform: '', opacity: '' });   // end of a swipe
     view.innerHTML = html;
@@ -279,6 +281,11 @@
     });
     moveTabIndicator(TABS.indexOf(state.route.tab));
     view.scrollTop = keepScroll ? y : 0;
+    // Inner lists keep their place on in-place updates and start at the newest entry otherwise.
+    $$('[data-keep-scroll]', view).forEach((el) => {
+      const was = inner[el.dataset.keepScroll];
+      el.scrollTop = keepScroll && was != null ? was : el.scrollHeight;
+    });
   }
 
   window.addEventListener('hashchange', () => {
@@ -932,17 +939,25 @@
       : `${curMain.length}<small> ${curMain.length === 1 ? 'set' : 'sets'}</small>`;
 
     const timed = isTimedEx(cur);
-    const setsHtml = curMain.map((set, i) => {
+    // The session log: every main set of the session in the order logged, each
+    // labelled with its exercise, numbered per exercise. Drops sit under their set.
+    const perExercise = {};
+    const setsHtml = mainSets(session).map((set) => {
+      const i = perExercise[set.exerciseId] = (perExercise[set.exerciseId] || 0) + 1;
       const drops = dropsOf(session, set.id);
       const pr = prBySet[set.id];
       const dd = state.dropDraft && state.dropDraft.parentId === set.id ? state.dropDraft : null;
-      return `<div class="grp${set.id === state.justLogged ? ' enter' : ''}">
-        <div class="set-row">
-          <span class="n">${i + 1}</span>
-          <span class="w">${weightHtml(set.weightKg)}</span><span class="x">${timesSign(set)}</span><span class="r">${amountText(set)}</span>
-          <span class="rpe">${set.rpe != null ? `RPE ${set.rpe}` : ''}</span>
+      const setTimed = set.durationSec != null || isTimedEx(set.exerciseId);
+      return `<div class="grp log-item${set.exerciseId === cur ? ' cur' : ''}${set.id === state.justLogged ? ' enter' : ''}">
+        <div class="log-row">
+          <span class="n num">${i}</span>
+          <span class="lg-main">
+            <span class="lg-ex">${esc(exerciseName(set.exerciseId))}</span>
+            <span class="lg-val num"><span class="w">${weightHtml(set.weightKg)}</span> <span class="x">${timesSign(set)}</span> <span class="r">${amountText(set)}</span>${set.rpe != null ? `<span class="rpe">RPE ${set.rpe}</span>` : ''}</span>
+          </span>
           <span>${pr ? `<span class="pr-badge" title="${pr.includes('weight') ? 'Weight PR' : set.durationSec != null ? 'Time PR' : 'Rep PR'}">${TROPHY}PR</span>` : ''}</span>
-          <button class="row-menu" data-action="set-menu" data-id="${esc(set.id)}" data-n="${i + 1}" aria-label="Set ${i + 1} options">⋯</button>
+          ${setTimed || dd ? '<span></span>' : `<button class="lg-drop" data-action="drop-open" data-id="${esc(set.id)}" aria-label="Add a drop set to ${esc(exerciseName(set.exerciseId))} set ${i}">+ Drop</button>`}
+          <button class="row-menu" data-action="set-menu" data-id="${esc(set.id)}" data-n="${i}" aria-label="${esc(exerciseName(set.exerciseId))} set ${i} options">⋯</button>
         </div>
         ${set.note ? `<div class="set-note">${esc(set.note)}</div>` : ''}
         ${drops.map((d) => `<div class="drop-row${d.id === state.justLogged ? ' enter' : ''}">
@@ -961,7 +976,7 @@
             <button class="btn btn-primary btn-sm" data-action="drop-save">Add drop</button>
             <button class="icon-btn" data-action="drop-cancel" aria-label="Cancel drop set">${ICON.x}</button>
           </div>`
-          : timed ? '' : `<div class="drop-add"><button data-action="drop-open" data-id="${esc(set.id)}">+ Drop</button></div>`}
+          : ''}
       </div>`;
     }).join('');
 
@@ -992,12 +1007,17 @@
         <div class="rpe-ticks">${['—', 6, 7, 8, 9, 10].map((t, i) => `<span style="--f:${i === 0 ? 0 : (t - 5.5) / 4.5}">${t}</span>`).join('')}</div>
       </div>` : '';
 
-    return `${top}${notice}${stripHtml}
-      <div class="ex-head">
-        <div class="row1"><h2>${esc(exerciseName(cur))}</h2><span class="count">${count}</span></div>
-        <div class="last">${lastTime}</div>
+    // Layout: fixed header on top, the session log in the middle (grows, then
+    // scrolls on its own), and the Next card + log window fixed at the bottom.
+    return `<div class="workout">
+      <div class="w-head">${top}${notice}${stripHtml}
+        <div class="ex-head">
+          <div class="row1"><h2>${esc(exerciseName(cur))}</h2><span class="count">${count}</span></div>
+          <div class="last">${lastTime}</div>
+        </div>
       </div>
-      ${curMain.length ? `<div class="sets">${setsHtml}</div>` : ''}
+      ${setsHtml ? `<div class="w-list sets" data-keep-scroll="w-list" aria-label="Sets this session">${setsHtml}</div>` : ''}
+      <div class="w-foot">
       ${nextHtml}
       <div class="entry">
         <div class="corner-slot" data-corner-slot>${cornerTimerHtml()}</div>
@@ -1034,7 +1054,9 @@
           : '<button class="text-btn" data-action="note-open">+ note</button>'}
           <button class="text-btn plates-btn" data-action="plates">Plates</button></div>
         <button class="log-btn" data-action="log-set">Log set ${curMain.length + 1}</button>
-      </div>`;
+      </div>
+      </div>
+    </div>`;
   }
 
   /* ---------- Entry controls ---------- */
@@ -1115,8 +1137,8 @@
       state.justLogged = set.id;               // slides the new row in
       await render({ keepScroll: true });
       state.justLogged = null;
-      const v = $('#view');
-      v.scrollTo({ top: v.scrollHeight, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+      const list = $('.w-list');               // bring the new set into view
+      if (list) list.scrollTo({ top: list.scrollHeight, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
     } finally {
       state.busy = false;
     }

@@ -547,6 +547,34 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .next-card .t span { color: var(--muted); }
 .next-card .keep { min-height: 36px; border: 1px solid var(--accent-text); color: var(--accent-text); border-radius: var(--r); padding: 0 14px; font-size: 14px; font-weight: 700; }
 
+/*
+ * Workout screen layout: a column that fills the screen. Header (fixed), the
+ * session log (grows with each set, then scrolls on its own), and the Next
+ * card + log window (fixed). With few sets the log window sits right under
+ * them; once the screen is full it stays put and only the log scrolls.
+ */
+.workout { display: flex; flex-direction: column; height: 100%; }
+.w-head, .w-foot { flex: none; }
+.w-head .w-top { position: static; }
+.w-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.workout .entry { position: relative; bottom: auto; }
+
+/* Session log rows: small exercise name over the set */
+.log-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto 36px; align-items: center; column-gap: 8px; padding: 6px 6px 6px 16px; min-height: 52px; }
+.lg-drop { min-height: 30px; padding: 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: var(--r); white-space: nowrap; }
+.log-item .drop-row, .log-item .set-note { padding-left: 50px; }
+.log-item .drop-row { grid-template-columns: 0 58px 12px minmax(30px, auto) minmax(0, 1fr) auto 36px; }
+.log-item .drop-edit { margin-left: 50px; }
+.log-row .n { width: 24px; height: 24px; border: 1px solid var(--line-strong); border-radius: var(--r); display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--muted); }
+.log-item.cur .log-row .n { border-color: var(--fg); color: var(--fg); }
+.lg-main { display: grid; min-width: 0; }
+.lg-ex { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-val { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-val .w small { font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 1px; }
+.lg-val .x { color: var(--muted); font-size: 13px; font-weight: 500; margin: 0 2px; }
+.lg-val .rpe { margin-left: 10px; font-family: var(--f-ui); font-size: 12px; font-weight: 500; color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { .log-row:hover { background: var(--hover); } }
+
 /* Entry block: stays at the bottom, above the tab bar, so it is always in thumb reach. */
 .entry {
   position: sticky;
