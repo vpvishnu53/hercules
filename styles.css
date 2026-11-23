@@ -681,21 +681,32 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
   .pr-pop:hover { filter: brightness(1.05); }
 }
 
-/* ---------- Bottom tab bar: the accent bar slides between tabs ---------- */
-.tabbar a { position: relative; }
+/* ---------- Bottom tab bar: one green bar slides between tabs ---------- */
 .tabbar a[aria-current="page"] { box-shadow: none; }
-.tabbar a::before {
-  content: "";
+.tab-ind {
   position: absolute;
-  top: 0; left: 0; right: 0;
+  top: -1px; left: 0;
+  width: 25%;
   height: 2px;
   background: var(--accent);
-  transform: scaleX(0);
-  transition: transform 240ms var(--ease);
+  transform: translateX(0);
+  transition: transform 260ms var(--ease);
+  pointer-events: none;
 }
-.tabbar a[aria-current="page"]::before { transform: scaleX(1); }
 .tabbar a svg { transition: transform var(--dur) var(--ease); }
 .tabbar a[aria-current="page"] svg { transform: translateY(-1px); }
+
+/* ---------- Moving between the four tabs ---------- */
+#app { overflow-x: clip; }                 /* a page mid-swipe never scrolls the screen sideways */
+#view { will-change: auto; }
+#view.enter-next { animation: from-right 240ms var(--ease) both; }
+#view.enter-prev { animation: from-left 240ms var(--ease) both; }
+#view.swipe-next { animation: from-right-full 260ms var(--ease) both; }
+#view.swipe-prev { animation: from-left-full 260ms var(--ease) both; }
+@keyframes from-right { from { opacity: 0; transform: translateX(18%); } to { opacity: 1; transform: none; } }
+@keyframes from-left { from { opacity: 0; transform: translateX(-18%); } to { opacity: 1; transform: none; } }
+@keyframes from-right-full { from { opacity: 0.4; transform: translateX(100%); } to { opacity: 1; transform: none; } }
+@keyframes from-left-full { from { opacity: 0.4; transform: translateX(-100%); } to { opacity: 1; transform: none; } }
 
 /* ---------- Switch knob ---------- */
 .switch { transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease); }

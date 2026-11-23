@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.9';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.10';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -143,7 +143,13 @@
     el.animate([{ transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: 170, easing: 'cubic-bezier(.2,.7,.2,1)' });
   }
 
-  /** animate: fade the new screen in (used when moving to a different screen, not on in-place updates). */
+  const ENTER_CLASSES = ['view-enter', 'enter-next', 'enter-prev', 'swipe-next', 'swipe-prev'];
+
+  /**
+   * animate: how the new screen arrives. true = fade (a sub-screen),
+   * 'enter-next' / 'enter-prev' = slide in from the right / left (tab tap),
+   * 'swipe-next' / 'swipe-prev' = full slide after a swipe. In-place updates pass nothing.
+   */
   async function render({ keepScroll = false, animate = false } = {}) {
     const token = ++renderToken;
     const y = window.scrollY;
@@ -157,17 +163,19 @@
     }
     if (token !== renderToken) return;          // a newer render started
     const view = $('#view');
-    view.classList.remove('view-enter');         // in-place updates never fade
+    view.classList.remove(...ENTER_CLASSES);     // in-place updates never animate
+    Object.assign(view.style, { transition: '', transform: '', opacity: '' });   // end of a swipe
     view.innerHTML = html;
-    if (animate) {
+    if (animate && !reduceMotion.matches) {
       void view.offsetWidth;                     // restart the animation
-      view.classList.add('view-enter');
+      view.classList.add(animate === true ? 'view-enter' : animate);
     }
     if (screen.after) screen.after(view);
     $$('.tabbar a').forEach((a) => {
       if (a.dataset.tab === state.route.tab) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     });
+    moveTabIndicator(TABS.indexOf(state.route.tab));
     window.scrollTo(0, keepScroll ? y : 0);
   }
 
@@ -177,8 +185,105 @@
     if (prev.tab === 'settings' && prev.parts[0] === 'split' && state.route.parts[0] !== 'split') state.splitDraft = null;
     closeSheet();
     const sameCalendar = prev.tab === 'calendar' && state.route.tab === 'calendar';
-    render({ keepScroll: sameCalendar, animate: !sameCalendar });
+    let animate = !sameCalendar;
+    if (prev.tab !== state.route.tab) {
+      const forward = TABS.indexOf(state.route.tab) > TABS.indexOf(prev.tab);
+      animate = state.pendingSwipe ? (forward ? 'swipe-next' : 'swipe-prev') : (forward ? 'enter-next' : 'enter-prev');
+    }
+    state.pendingSwipe = false;
+    render({ keepScroll: sameCalendar, animate });
   });
+
+  /* ------------------------------------------------------------------ */
+  /* Tab bar indicator: one green bar that slides between tabs and       */
+  /* follows the finger during a swipe.                                  */
+  /* ------------------------------------------------------------------ */
+
+  const tabIndicator = document.createElement('span');
+  tabIndicator.className = 'tab-ind';
+  tabIndicator.setAttribute('aria-hidden', 'true');
+  $('.tabbar').append(tabIndicator);
+
+  /** pos: tab index, fractional while dragging. */
+  function moveTabIndicator(pos, { instant = false } = {}) {
+    tabIndicator.style.transition = instant ? 'none' : '';
+    tabIndicator.style.transform = `translateX(${(pos * 100).toFixed(2)}%)`;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Swipe left / right on a screen to move to the next / previous tab.  */
+  /* The page follows the finger; a short or slow swipe springs back.    */
+  /* Not started on inputs, sliders, the exercise chip row, near the     */
+  /* screen edges (Android's back gesture) or while a sheet is open.     */
+  /* ------------------------------------------------------------------ */
+
+  (function swipeTabs() {
+    const view = $('#view');
+    const EDGE = 24;
+    let s = null;
+    let busy = false;
+    const blocked = (el) => el.closest('input, textarea, select, [contenteditable], .ex-strip, .drop-edit, .no-swipe');
+
+    function reset(animated) {
+      view.style.transition = animated ? 'transform 220ms var(--ease), opacity 220ms var(--ease)' : '';
+      view.style.transform = '';
+      view.style.opacity = '';
+      moveTabIndicator(TABS.indexOf(state.route.tab));
+      if (animated) setTimeout(() => { if (!s) view.style.transition = ''; }, 240);
+    }
+
+    view.addEventListener('touchstart', (ev) => {
+      if (busy || ev.touches.length !== 1 || sheet || !$('#timer-overlay').hidden) return;
+      const t = ev.touches[0];
+      if (t.clientX < EDGE || t.clientX > window.innerWidth - EDGE || blocked(ev.target)) return;
+      s = { x0: t.clientX, y0: t.clientY, t0: performance.now(), dx: 0, lock: null, idx: TABS.indexOf(state.route.tab) };
+    }, { passive: true });
+
+    view.addEventListener('touchmove', (ev) => {
+      if (!s) return;
+      const t = ev.touches[0];
+      const dx = t.clientX - s.x0;
+      const dy = t.clientY - s.y0;
+      if (!s.lock) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        s.lock = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+        if (s.lock === 'y') { s = null; return; }
+        view.classList.remove(...ENTER_CLASSES);
+        view.style.transition = 'none';
+      }
+      ev.preventDefault();                      // horizontal: don't let the page scroll
+      const outOfTabs = (dx > 0 && s.idx === 0) || (dx < 0 && s.idx === TABS.length - 1);
+      s.dx = outOfTabs ? dx * 0.25 : dx;       // rubber band past the first / last tab
+      const w = window.innerWidth;
+      view.style.transform = `translateX(${s.dx}px)`;
+      view.style.opacity = String(1 - Math.min(Math.abs(s.dx) / w, 1) * 0.3);
+      moveTabIndicator(Math.max(0, Math.min(TABS.length - 1, s.idx - s.dx / w)), { instant: true });
+    }, { passive: false });
+
+    function end() {
+      if (!s) return;
+      const { dx, idx, t0, lock } = s;
+      s = null;
+      if (lock !== 'x') return;
+      const speed = Math.abs(dx) / Math.max(1, performance.now() - t0);   // px per ms
+      const dir = dx < 0 ? 1 : -1;
+      const target = idx + dir;
+      const commit = target >= 0 && target < TABS.length
+        && (Math.abs(dx) > window.innerWidth * 0.28 || (speed > 0.45 && Math.abs(dx) > 40));
+      if (!commit) { reset(true); return; }
+      busy = true;
+      state.pendingSwipe = true;
+      const finish = () => { busy = false; location.hash = `#${TABS[target]}`; };
+      if (reduceMotion.matches) { finish(); return; }
+      view.style.transition = 'transform 170ms var(--ease), opacity 170ms var(--ease)';
+      view.style.transform = `translateX(${dir > 0 ? '-100%' : '100%'})`;
+      view.style.opacity = '0.4';
+      moveTabIndicator(target);
+      setTimeout(finish, 170);                 // render() clears these styles when the new tab is in
+    }
+    view.addEventListener('touchend', end);
+    view.addEventListener('touchcancel', () => { if (s) { s = null; reset(true); } });
+  })();
 
   /* ------------------------------------------------------------------ */
   /* Actions (event delegation)                                          */
