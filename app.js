@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.13';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.14';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -510,8 +510,9 @@
       fields: [
         { name: 'name', label: 'Name', value: name, placeholder: 'e.g. Landmine Press' },
         { name: 'group', label: 'Muscle group', type: 'select', value: 'other', options: groupOptions() },
+        { name: 'timed', label: 'Log it by', type: 'select', value: '', options: [['', 'Reps'], ['1', 'Time (planks, hangs)']] },
       ],
-      onSubmit: (v) => Store.addExercise({ name: v.name, group: v.group }),
+      onSubmit: (v) => Store.addExercise({ name: v.name, group: v.group, timed: v.timed === '1' }),
     });
     if (ex) { await refresh(); toast(`Added ${ex.name}`); }
     return ex;
@@ -637,15 +638,34 @@
   /** Weight as typed into a field: plain minus, no unit, blank for bodyweight. */
   const inputText = (kg) => (kg == null ? '' : String(Units.display(kg)));
   const weightHtml = (kg) => (kg == null ? 'BW' : `${Units.format(kg)}<small>${Units.unit}</small>`);
-  const weightPlain = (kg) => (kg == null ? 'Bodyweight' : `${Units.format(kg)} ${Units.unit}`);
+  // A typed 0 counts as bodyweight (PR rules treat blank as 0), so it reads the same.
+  const weightPlain = (kg) => (kg == null || kg === 0 ? 'Bodyweight' : `${Units.format(kg)} ${Units.unit}`);
+
+  /* Timed exercises (planks, dead hangs) log a time instead of reps. */
+  const isTimedEx = (id) => !!(exerciseById(id) || {}).timed;
+  const msLabel = (m) => (m.type === 'weight' ? 'Weight PR' : m.durationSec != null ? 'Time PR' : 'Rep PR');
+  /** "8" or "1:05" for a set, milestone or chart point (a time wins when present). */
+  const amountText = (x) => (x.durationSec != null ? fmtDuration(x.durationSec) : String(x.reps));
+  /** "×" between weight and reps, "·" between weight and a time. */
+  const timesSign = (x) => (x.durationSec != null ? '·' : '×');
+  /** What a "previous best" was: "6 reps" or "0:58". */
+  const prevAmount = (p) => (p.durationSec != null ? fmtDuration(p.durationSec) : plural(p.reps, 'rep'));
+  /** "1:05", "65" or "1:5" → seconds, or null. */
+  function parseDuration(text) {
+    const t = String(text || '').trim();
+    let m = t.match(/^(\d+):(\d{1,2})$/);
+    if (m) return Number(m[1]) * 60 + Number(m[2]);
+    m = t.match(/^\d+$/);
+    return m ? Number(t) : null;
+  }
 
   /** "80 × 8, 8, 7" when the weight is the same, else "80 × 8, 82.5 × 6". */
   function setsSummary(sets) {
     if (!sets.length) return '';
     const w0 = sets[0].weightKg == null ? 0 : sets[0].weightKg;
     const same = sets.every((s) => Math.abs((s.weightKg == null ? 0 : s.weightKg) - w0) <= PRs.TOLERANCE_KG);
-    if (same) return `${Units.format(sets[0].weightKg)} × ${sets.map((s) => s.reps).join(', ')}`;
-    return sets.map((s) => `${Units.format(s.weightKg)} × ${s.reps}`).join(', ');
+    if (same) return `${Units.format(sets[0].weightKg)} ${timesSign(sets[0])} ${sets.map(amountText).join(', ')}`;
+    return sets.map((s) => `${Units.format(s.weightKg)} ${timesSign(s)} ${amountText(s)}`).join(', ');
   }
 
   /** The most recent earlier session with main sets of this exercise. */
@@ -674,7 +694,8 @@
       units: Units.unit,
       exactKg: src ? src.weightKg : undefined,
       weightText: src ? inputText(src.weightKg) : '',
-      reps: src ? src.reps : 8,
+      reps: src && src.reps != null ? src.reps : 8,
+      seconds: src && src.durationSec != null ? src.durationSec : 30,   // timed exercises
       rpe: null,                         // RPE starts empty for every set; it only gets a value when the slider is used
       note: '',
       showNote: false,
@@ -739,15 +760,27 @@
     }
     const chipTypes = todayType ? types.filter((t) => t.id !== todayType.id) : types;
 
+    // First launch (no split yet and not skipped): a clear way into setting up.
+    const setup = !types.length && !s.setupDone ? `<div class="setup-card">
+        <span class="when">Get started</span>
+        <span class="what">Set up your training</span>
+        <span class="detail">Pick the exercises you do and group them into sessions like Push, Pull and Legs. Hercules then shows your target sets and suggests the next exercise as you train.</span>
+        <a class="btn btn-primary btn-xl btn-block" href="#settings/split/new">Set up my split</a>
+        <div class="setup-links">
+          <a class="text-btn" href="#settings/exercises">Browse exercises</a>
+          <button class="text-btn" data-action="setup-skip">Skip, I'll train freestyle</button>
+        </div>
+      </div>` : '';
+
     return `${head('Log')}
-      ${top}
-      <section class="group" style="margin-top:${top ? 8 : 20}px">
+      ${setup}${top}
+      <section class="group" style="margin-top:${top || setup ? 8 : 20}px">
         <h2 class="group-title">${todayType ? 'Or start something else' : 'Session (optional)'}</h2>
         <div class="chips" role="group">
           ${chipTypes.map((t) => `<button class="chip" data-action="start-pick" data-type="${esc(t.id)}" aria-pressed="${state.startPick === t.id}">${esc(t.name)}</button>`).join('')}
           <button class="chip" data-action="start-pick" data-type="" aria-pressed="${!state.startPick}">Freestyle</button>
         </div>
-        ${types.length ? '' : '<p class="group-note">Set up session types like Push or Legs in Settings to get exercise suggestions. Freestyle works without one.</p>'}
+        ${types.length || setup ? '' : '<p class="group-note">You can set up a split any time in Settings → Split.</p>'}
       </section>
       ${last ? `<p class="last-row">Last workout: <a href="#calendar/${last.date}"><b>${esc(sessionLabel(last))}</b> · ${esc(prettyDate(last.date))}</a> · ${plural(mainSets(last).length, 'set')}</p>` : ''}
       <div class="start-bar">
@@ -758,6 +791,10 @@
 
   actions['start-pick'] = (el) => { state.startPick = el.dataset.type || null; return render({ keepScroll: true }); };
   actions['start-go'] = () => startWorkout(state.startPick);
+  actions['setup-skip'] = async () => {
+    state.settings = await Store.updateSettings({ setupDone: true });
+    await render({ keepScroll: true });
+  };
   actions.start = (el) => startWorkout(el.dataset.type || null);
 
   async function startWorkout(sessionTypeId) {
@@ -816,6 +853,7 @@
       ? `${curMain.length}<small> / ${plural(splitItem.targetSets, 'set')}</small>`
       : `${curMain.length}<small> ${curMain.length === 1 ? 'set' : 'sets'}</small>`;
 
+    const timed = isTimedEx(cur);
     const setsHtml = curMain.map((set, i) => {
       const drops = dropsOf(session, set.id);
       const pr = prBySet[set.id];
@@ -823,9 +861,9 @@
       return `<div class="grp${set.id === state.justLogged ? ' enter' : ''}">
         <div class="set-row">
           <span class="n">${i + 1}</span>
-          <span class="w">${weightHtml(set.weightKg)}</span><span class="x">×</span><span class="r">${set.reps}</span>
+          <span class="w">${weightHtml(set.weightKg)}</span><span class="x">${timesSign(set)}</span><span class="r">${amountText(set)}</span>
           <span class="rpe">${set.rpe != null ? `RPE ${set.rpe}` : ''}</span>
-          <span>${pr ? `<span class="pr-badge" title="${pr.includes('weight') ? 'Weight PR' : 'Rep PR'}">${TROPHY}PR</span>` : ''}</span>
+          <span>${pr ? `<span class="pr-badge" title="${pr.includes('weight') ? 'Weight PR' : set.durationSec != null ? 'Time PR' : 'Rep PR'}">${TROPHY}PR</span>` : ''}</span>
           <button class="row-menu" data-action="set-menu" data-id="${esc(set.id)}" data-n="${i + 1}" aria-label="Set ${i + 1} options">⋯</button>
         </div>
         ${set.note ? `<div class="set-note">${esc(set.note)}</div>` : ''}
@@ -845,7 +883,7 @@
             <button class="btn btn-primary btn-sm" data-action="drop-save">Add drop</button>
             <button class="icon-btn" data-action="drop-cancel" aria-label="Cancel drop set">${ICON.x}</button>
           </div>`
-          : `<div class="drop-add"><button data-action="drop-open" data-id="${esc(set.id)}">+ Drop</button></div>`}
+          : timed ? '' : `<div class="drop-add"><button data-action="drop-open" data-id="${esc(set.id)}">+ Drop</button></div>`}
       </div>`;
     }).join('');
 
@@ -895,14 +933,21 @@
               <button class="sign" data-action="w-sign" aria-label="Switch between added weight and assistance">±</button>
             </div>
           </div>
-          <div>
+          ${timed ? `<div>
+            <span class="lab">Time <em>tap to time it</em></span>
+            <div class="reps time">
+              <button data-action="secs-step" data-step="-5" aria-label="5 seconds less">−</button>
+              <button class="time-out num" data-action="time-it" aria-label="Time it with the stopwatch"><output id="secs-out" aria-live="polite">${fmtDuration(e.seconds)}</output></button>
+              <button data-action="secs-step" data-step="5" aria-label="5 seconds more">+</button>
+            </div>
+          </div>` : `<div>
             <span class="lab">Reps</span>
             <div class="reps">
               <button data-action="reps-step" data-step="-1" aria-label="One fewer rep">−</button>
               <output id="reps-out" aria-live="polite">${e.reps}</output>
               <button data-action="reps-step" data-step="1" aria-label="One more rep">+</button>
             </div>
-          </div>
+          </div>`}
         </div>
         ${rpe}
         <div class="note-row">${e.showNote
@@ -932,6 +977,23 @@
     $('#reps-out').textContent = e.reps;
     bump($('#reps-out'));
   };
+  actions['secs-step'] = (el) => {
+    const e = state.entry;
+    e.seconds = Math.min(86400, Math.max(1, e.seconds + Number(el.dataset.step)));
+    $('#secs-out').textContent = fmtDuration(e.seconds);
+    bump($('#secs-out'));
+  };
+  /** Opens the big clock on the Stopwatch tab and starts it (if it isn't running already). */
+  actions['time-it'] = () => {
+    timer.tab = 'watch';
+    if (!watch.running) {
+      Object.assign(watch, { running: true, startAt: Date.now(), acc: 0 });
+      ensureTicking();
+      wakeOn();
+    }
+    timer.overlay = true;
+    refreshRestUi();
+  };
   actions['w-sign'] = () => {
     const e = state.entry;
     const t = e.weightText.trim();
@@ -957,7 +1019,7 @@
       const set = await Store.addSet(session.id, {
         exerciseId: e.exerciseId,
         weightKg: w.kg,
-        reps: e.reps,
+        ...(isTimedEx(e.exerciseId) ? { reps: null, durationSec: e.seconds } : { reps: e.reps }),
         rpe: state.settings.rpeEnabled ? e.rpe : null,
         note: e.showNote ? e.note : '',
       });
@@ -1015,7 +1077,7 @@
     const session = await Store.getActiveSession();
     const set = session.sets.find((x) => x.id === el.dataset.id);
     if (!set) return;
-    const label = `${set.kind === 'drop' ? 'Drop set' : `Set ${el.dataset.n}`} · ${weightPlain(set.weightKg)} × ${set.reps}`;
+    const label = `${set.kind === 'drop' ? 'Drop set' : `Set ${el.dataset.n}`} · ${weightPlain(set.weightKg)} ${timesSign(set)} ${amountText(set)}`;
     const choice = await choiceSheet({ title: label, options: [['edit', 'Edit'], ['delete', 'Delete', true]] });
     if (choice === 'edit') await editSet(session, set);
     if (choice === 'delete') await deleteSet(session, set);
@@ -1026,7 +1088,9 @@
     const rpeOptions = [['', 'None'], ...[6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((v) => [String(v), String(v)])];
     const fields = [
       { name: 'weight', label: `Weight (${Units.unit}, blank = bodyweight)`, value: inputText(set.weightKg), inputmode: 'decimal', num: true },
-      { name: 'reps', label: 'Reps', value: String(set.reps), inputmode: 'numeric', num: true },
+      set.durationSec != null
+        ? { name: 'time', label: 'Time (m:ss)', value: fmtDuration(set.durationSec), inputmode: 'numeric', num: true }
+        : { name: 'reps', label: 'Reps', value: String(set.reps), inputmode: 'numeric', num: true },
     ];
     if (isMain && (state.settings.rpeEnabled || set.rpe != null)) {
       fields.push({ name: 'rpe', label: 'RPE', type: 'select', value: set.rpe == null ? '' : String(set.rpe), options: rpeOptions });
@@ -1038,9 +1102,16 @@
       onSubmit: async (v) => {
         const w = entryKg(v.weight, set.weightKg);
         if (w.error) throw new Error(w.error);
-        const reps = Number(v.reps);
-        if (!Number.isInteger(reps) || reps < 1) throw new Error('Reps must be a whole number of 1 or more.');
-        const patch = { weightKg: w.kg, reps };
+        const patch = { weightKg: w.kg };
+        if ('time' in v) {
+          const sec = parseDuration(v.time);
+          if (!sec) throw new Error('Enter the time as minutes:seconds, like 1:05.');
+          patch.durationSec = sec;
+        } else {
+          const reps = Number(v.reps);
+          if (!Number.isInteger(reps) || reps < 1) throw new Error('Reps must be a whole number of 1 or more.');
+          patch.reps = reps;
+        }
         if ('rpe' in v) patch.rpe = v.rpe === '' ? null : Number(v.rpe);
         if ('note' in v) patch.note = v.note;
         return Store.updateSet(session.id, set.id, patch);
@@ -1188,12 +1259,12 @@
   let prTimer = null;
   function showPrBanner(m) {
     const name = exerciseName(m.exerciseId);
-    const title = m.type === 'weight' ? `Weight PR · ${name}` : `Rep PR · ${name}`;
+    const title = `${msLabel(m)} · ${name}`;
     const prevText = m.type === 'weight'
       ? `Heaviest before: ${weightPlain(m.previous.weightKg)}`
-      : `Best before: ${plural(m.previous.reps, 'rep')} at ${weightPlain(m.previous.weightKg)}`;
+      : `Best before: ${prevAmount(m.previous)} at ${weightPlain(m.previous.weightKg)}`;
     $('#pr-banner').innerHTML = `<button class="pr-pop" data-action="pr-dismiss">${TROPHY}
-      <span class="t"><b>${esc(title)}</b><span class="num">${esc(weightPlain(m.weightKg))} × ${m.reps} · ${esc(prevText)}</span></span></button>`;
+      <span class="t"><b>${esc(title)}</b><span class="num">${esc(weightPlain(m.weightKg))} ${timesSign(m)} ${amountText(m)} · ${esc(prevText)}</span></span></button>`;
     if (navigator.vibrate) navigator.vibrate([60, 60, 120]);
     clearTimeout(prTimer);
     prTimer = setTimeout(() => { $('#pr-banner').innerHTML = ''; }, 5000);
@@ -1380,7 +1451,9 @@
            <button class="btn btn-secondary" disabled>To note</button>`
         : `<button class="btn btn-secondary" data-action="watch-reset" ${has ? '' : 'disabled'}>Reset</button>
            <button class="btn btn-primary" data-action="watch-start">${has ? 'Resume' : 'Start'}</button>
-           <button class="btn btn-secondary" data-action="watch-note" ${has && state.entry && state.activeSession ? '' : 'disabled'}>To note</button>`;
+           ${state.entry && state.activeSession && isTimedEx(state.entry.exerciseId)
+             ? `<button class="btn btn-secondary" data-action="watch-use" ${has ? '' : 'disabled'}>Use time</button>`
+             : `<button class="btn btn-secondary" data-action="watch-note" ${has && state.entry && state.activeSession ? '' : 'disabled'}>To note</button>`}`;
       body = `${dialSvg('dial-big', 'watch')}
         <span class="title">Stopwatch</span>
         <div class="btns">${controls}</div>`;
@@ -1406,8 +1479,9 @@
     if (timer.running || watch.running) timer.interval = setInterval(timerTick, watch.running ? 100 : 200);
   }
 
+  /** Starting a rest opens the big clock; it stays open until you close it. */
   function timerStart(sec) {
-    Object.assign(timer, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + sec * 1000, total: sec, nextSec: 0 });
+    Object.assign(timer, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + sec * 1000, total: sec, nextSec: 0, overlay: true, tab: 'rest' });
     ensureTicking();
     wakeOn();
     refreshRestUi();
@@ -1450,6 +1524,7 @@
   };
   actions['watch-start'] = () => {
     Object.assign(watch, { running: true, startAt: Date.now() });
+    Object.assign(timer, { overlay: true, tab: 'watch' });
     ensureTicking();
     wakeOn();
     refreshRestUi();
@@ -1465,6 +1540,19 @@
     ensureTicking();
     wakeOff();
     refreshRestUi();
+  };
+  /** Timed exercise: the stopwatch time becomes the set's time, ready to log. */
+  actions['watch-use'] = async () => {
+    if (!state.entry) return;
+    const sec = Math.max(1, Math.round(watchMs() / 1000));
+    state.entry.seconds = sec;
+    Object.assign(watch, { running: false, startAt: 0, acc: 0 });
+    timer.overlay = false;
+    ensureTicking();
+    wakeOff();
+    await render({ keepScroll: true });
+    refreshRestUi();
+    toast(`Time set to ${fmtDuration(sec)}. Tap Log set to save it.`);
   };
   /** Puts the stopwatch time into the note of the set being entered, e.g. "Held 0:45". */
   actions['watch-note'] = async () => {
@@ -1546,8 +1634,8 @@
       </div>
       ${ms.length ? `<section class="group sum-list"><h2 class="group-title">PRs hit</h2><div class="list">
         ${ms.map((m) => `<div class="row pr-line">${TROPHY}<span class="row-label">${esc(exerciseName(m.exerciseId))}
-          <small>${m.type === 'weight' ? 'Weight PR' : 'Rep PR'}</small></span>
-          <span class="num-r">${esc(weightPlain(m.weightKg))} × ${m.reps}</span></div>`).join('')}
+          <small>${msLabel(m)}</small></span>
+          <span class="num-r">${esc(weightPlain(m.weightKg))} ${timesSign(m)} ${amountText(m)}</span></div>`).join('')}
       </div></section>` : ''}
       <section class="group sum-list"><h2 class="group-title">Exercises</h2><div class="list">
         ${exIds.map((x) => {
@@ -1683,8 +1771,8 @@
         ${exIds.length ? exIds.map((x) => `<div class="sc-ex">
           <h3>${esc(exerciseName(x))}</h3>
           ${mainSets(s, x).map((set, i) => `
-            <div class="set-row"><span class="n">${i + 1}</span><span class="w">${weightHtml(set.weightKg)}</span><span class="x">×</span>
-              <span class="r">${set.reps}</span><span class="rpe">${set.rpe != null ? `RPE ${set.rpe}` : ''}</span>
+            <div class="set-row"><span class="n">${i + 1}</span><span class="w">${weightHtml(set.weightKg)}</span><span class="x">${timesSign(set)}</span>
+              <span class="r">${amountText(set)}</span><span class="rpe">${set.rpe != null ? `RPE ${set.rpe}` : ''}</span>
               <span>${prBySet[set.id] ? `<span class="pr-badge">${TROPHY}PR</span>` : ''}</span></div>
             ${set.note ? `<div class="set-note">${esc(set.note)}</div>` : ''}
             ${dropsOf(s, set.id).map((d) => `<div class="drop-row"><span class="arrow">↳</span><span class="w">${weightHtml(d.weightKg)}</span>
@@ -1880,18 +1968,17 @@
     resizeTimer = setTimeout(() => { if (state.route.tab === 'prs') render({ keepScroll: true }); }, 200);
   });
 
-  const msLabel = (m) => (m.type === 'weight' ? 'Weight PR' : 'Rep PR');
   const msDetail = (m) => `${TROPHY.replace('<svg', '<svg style="width:18px;height:18px;flex:none;color:var(--accent-text)"')}
-    <span><b>${esc(exerciseName(m.exerciseId))}</b> · <span class="num">${esc(weightPlain(m.weightKg))} × ${m.reps}</span><br>
+    <span><b>${esc(exerciseName(m.exerciseId))}</b> · <span class="num">${esc(weightPlain(m.weightKg))} ${timesSign(m)} ${amountText(m)}</span><br>
     <span class="muted">${msLabel(m)} · ${esc(prettyDate(m.date))} · ${m.type === 'weight'
       ? `was ${esc(weightPlain(m.previous.weightKg))}`
-      : `was ${plural(m.previous.reps, 'rep')}`}</span></span>`;
+      : `was ${prevAmount(m.previous)}`}</span></span>`;
 
   function msRow(m) {
     return `<div class="row">${ICON_DOT(m.type === 'reps')}
       <span class="row-label">${esc(exerciseName(m.exerciseId))}<small>${msLabel(m)} · ${esc(prettyDate(m.date))}</small></span>
-      <span class="num-r">${esc(weightPlain(m.weightKg))} × ${m.reps}
-        <small>${m.type === 'weight' ? `was ${esc(weightPlain(m.previous.weightKg))}` : `was ${plural(m.previous.reps, 'rep')}`}</small></span>
+      <span class="num-r">${esc(weightPlain(m.weightKg))} ${timesSign(m)} ${amountText(m)}
+        <small>${m.type === 'weight' ? `was ${esc(weightPlain(m.previous.weightKg))}` : `was ${prevAmount(m.previous)}`}</small></span>
     </div>`;
   }
 
@@ -1953,7 +2040,7 @@
 
     const viewSelect = `<div class="field"><label for="pr-view">Show</label>
       <span class="select-wrap"><select class="select" id="pr-view" data-change="pr-view">
-        ${[['all', 'All milestones'], ['weight', 'Weight PRs'], ['reps', 'Rep PRs'], ['bodyweight', 'Bodyweight']].map(([v, l]) =>
+        ${[['all', 'All milestones'], ['weight', 'Weight PRs'], ['reps', 'Rep / time PRs'], ['bodyweight', 'Bodyweight']].map(([v, l]) =>
           `<option value="${v}"${p.view === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select></span></div>`;
     const exSelect = `<div class="field"><label for="pr-ex">Exercise</label>
@@ -2021,10 +2108,10 @@
       x: dayNum(s.date),
       y: Units.display(typedKg(s.weightKg)),
       hollow: !prSessions.has(s.sessionId),
-      detail: `<span><b class="num">${esc(weightPlain(s.weightKg))} × ${s.reps}</b> · ${esc(prettyDate(s.date))}<br>
+      detail: `<span><b class="num">${esc(weightPlain(s.weightKg))} ${timesSign(s)} ${amountText(s)}</b> · ${esc(prettyDate(s.date))}<br>
         <span class="muted">${prSessions.has(s.sessionId) ? 'Weight PR this session' : 'Heaviest set this session'}</span></span>`,
     }));
-    return `<div class="pr-headline"><span class="big num">${esc(Units.format(best.weightKg))}<small> ${best.weightKg == null ? '' : Units.unit} × ${best.reps}</small></span>
+    return `<div class="pr-headline"><span class="big num">${esc(Units.format(best.weightKg))}<small> ${best.weightKg == null ? '' : Units.unit} ${timesSign(best)} ${amountText(best)}</small></span>
         <span class="sub">Heaviest so far · ${esc(prettyDate(best.date))} · ${plural(series.length, 'session')}</span></div>
       <div class="chart-box has-detail">
         <div class="chart-key"><span><i></i>Weight PR</span><span><i class="hollow"></i>Heaviest set of a session</span></div>
@@ -2062,24 +2149,27 @@
     const ms = milestones.filter((m) => m.exerciseId === exId && m.type === 'reps' && near(m.weightKg)).reverse();
     const prSessions = new Set(ms.map((m) => m.sessionId));
     if (!series.length) return '<p class="empty">No sets at this weight yet.</p>';
+    // For timed exercises "reps" in the series are seconds.
+    const timed = series.some((s) => s.timed);
+    const show = (n) => (timed ? fmtDuration(n) : plural(n, 'rep'));
     let best = series[0];
     for (const s of series) if (s.reps > best.reps) best = s;
     const points = series.map((s) => ({
       x: dayNum(s.date),
       y: s.reps,
       hollow: !prSessions.has(s.sessionId),
-      detail: `<span><b class="num">${plural(s.reps, 'rep')}</b> at ${esc(weightPlain(kg))} · ${esc(prettyDate(s.date))}<br>
-        <span class="muted">${prSessions.has(s.sessionId) ? 'Rep PR this session' : 'Most reps this session'}</span></span>`,
+      detail: `<span><b class="num">${show(s.reps)}</b> at ${esc(weightPlain(kg))} · ${esc(prettyDate(s.date))}<br>
+        <span class="muted">${prSessions.has(s.sessionId) ? (timed ? 'Time PR this session' : 'Rep PR this session') : (timed ? 'Longest hold this session' : 'Most reps this session')}</span></span>`,
     }));
-    return `<div class="pr-headline"><span class="big num">${best.reps}<small> reps at ${esc(weightPlain(kg))}</small></span>
-        <span class="sub">Most so far · ${esc(prettyDate(best.date))} · ${plural(series.length, 'session')} at this weight</span></div>
+    return `<div class="pr-headline"><span class="big num">${timed ? fmtDuration(best.reps) : best.reps}<small> ${timed ? '' : 'reps '}at ${esc(weightPlain(kg))}</small></span>
+        <span class="sub">${timed ? 'Longest' : 'Most'} so far · ${esc(prettyDate(best.date))} · ${plural(series.length, 'session')} at this weight</span></div>
       <div class="chart-box has-detail">
-        <div class="chart-key"><span><i></i>Rep PR</span><span><i class="hollow"></i>Most reps in a session</span></div>
-        ${chartSvg(points, { line: true, yInteger: true })}
+        <div class="chart-key"><span><i></i>${timed ? 'Time PR' : 'Rep PR'}</span><span><i class="hollow"></i>${timed ? 'Longest hold in a session' : 'Most reps in a session'}</span></div>
+        ${chartSvg(points, { line: true, yInteger: !timed, yFormat: timed ? (v) => fmtDuration(Math.max(0, Math.round(v))) : undefined })}
       </div>
       <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the session.</span></div>
-      <section class="group ms-list"><h2 class="group-title">Rep PRs at ${esc(weightPlain(kg))}, newest first</h2>
-        ${ms.length ? `<div class="list">${ms.map(msRow).join('')}</div>` : '<p class="empty">No rep PRs at this weight yet.</p>'}
+      <section class="group ms-list"><h2 class="group-title">${timed ? 'Time' : 'Rep'} PRs at ${esc(weightPlain(kg))}, newest first</h2>
+        ${ms.length ? `<div class="list">${ms.map(msRow).join('')}</div>` : `<p class="empty">No ${timed ? 'time' : 'rep'} PRs at this weight yet.</p>`}
       </section>`;
   }
 
@@ -2400,7 +2490,7 @@
     const hidden = state.exercises.filter((e) => e.archived).sort((a, b) => a.name.localeCompare(b.name));
     const row = (e) => `
       <div class="lib-row">
-        <span class="name">${esc(e.name)}${e.custom ? '<span class="tag">Custom</span>' : ''}</span>
+        <span class="name">${esc(e.name)}${e.timed ? '<span class="tag">Timed</span>' : ''}${e.custom ? '<span class="tag">Custom</span>' : ''}</span>
         <button class="text-btn" data-action="ex-edit" data-id="${esc(e.id)}">Edit</button>
         <button class="text-btn" data-action="ex-hide" data-id="${esc(e.id)}">${e.archived ? 'Show' : 'Hide'}</button>
       </div>`;
@@ -2427,8 +2517,9 @@
       fields: [
         { name: 'name', label: 'Name', value: e.name },
         { name: 'group', label: 'Muscle group', type: 'select', value: e.group, options: groupOptions() },
+        { name: 'timed', label: 'Log it by', type: 'select', value: e.timed ? '1' : '', options: [['', 'Reps'], ['1', 'Time (planks, hangs)']] },
       ],
-      onSubmit: (v) => Store.updateExercise(e.id, { name: v.name, group: v.group }),
+      onSubmit: (v) => Store.updateExercise(e.id, { name: v.name, group: v.group, timed: v.timed === '1' }),
     });
     if (!res) return;
     await refresh();

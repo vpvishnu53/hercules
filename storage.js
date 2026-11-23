@@ -111,6 +111,9 @@
   function checkReps(r) {
     assert(Number.isInteger(r) && r >= 1 && r <= 1000, 'Reps must be a whole number of 1 or more.');
   }
+  function checkDuration(sec) {
+    assert(Number.isInteger(sec) && sec >= 1 && sec <= 86400, 'Time must be at least 1 second.');
+  }
   function checkRpe(r) {
     assert(r === null || (typeof r === 'number' && r >= 6 && r <= 10 && Math.round(r * 2) === r * 2),
       'RPE must be between 6 and 10 in steps of 0.5.');
@@ -137,8 +140,11 @@
     ['Triceps Pushdown', 'arms'], ['Skull Crusher', 'arms'], ['Overhead Triceps Extension', 'arms'],
     ['Close-Grip Bench Press', 'arms'],
     ['Hanging Leg Raise', 'core'], ['Cable Crunch', 'core'], ['Ab Wheel Rollout', 'core'],
-  ].map(([name, group]) => ({
-    id: `ex_${slug(name)}`, name, group, custom: false, archived: false,
+    // Logged by time instead of reps
+    ['Plank', 'core', true], ['Side Plank', 'core', true], ['Hollow Hold', 'core', true],
+    ['Dead Hang', 'back', true], ['Wall Sit', 'legs', true],
+  ].map(([name, group, timed]) => ({
+    id: `ex_${slug(name)}`, name, group, custom: false, archived: false, timed: !!timed,
   }));
 
   function defaultSettings() {
@@ -147,6 +153,7 @@
       theme: 'system',        // 'system' | 'light' | 'dark'
       accent: 'green',        // colour option: green (default), blue, red, orange, yellow, graphite
       plateBar: { kg: 20, lb: 45 },   // bar used by the plate calculator, per unit
+      setupDone: false,       // the first-launch "set up your split" card was used or skipped
       rpeEnabled: false,
       // placement: 'panel' (a row above the set entry) or 'corner' (an hourglass button)
       restTimer: { enabled: false, autoStart: false, durationSec: 120, placement: 'panel' },
@@ -338,21 +345,22 @@
 
     getExercise(id) { return read((d) => d.exercises.find((e) => e.id === id) || null); },
 
-    addExercise({ name, group = 'other' }) {
+    /** timed: true logs this exercise by time (planks, dead hangs) instead of reps. */
+    addExercise({ name, group = 'other', timed = false }) {
       return write((d) => {
         const n = cleanName(name);
         assert(n, 'Give the exercise a name.');
         const clash = nameTaken(d, n);
         assert(!clash, `You already have an exercise called "${clash && clash.name}".`);
         assert(MUSCLE_GROUPS.includes(group), 'Unknown muscle group.');
-        const ex = { id: newId('ex'), name: n, group, custom: true, archived: false };
+        const ex = { id: newId('ex'), name: n, group, custom: true, archived: false, timed: !!timed };
         d.exercises.push(ex);
         return ex;
       });
     },
 
     /** Renames keep history: sets reference the id, not the name. */
-    updateExercise(id, { name, group }) {
+    updateExercise(id, { name, group, timed }) {
       return write((d) => {
         const ex = findExercise(d, id);
         if (name !== undefined) {
@@ -366,6 +374,7 @@
           assert(MUSCLE_GROUPS.includes(group), 'Unknown muscle group.');
           ex.group = group;
         }
+        if (timed !== undefined) ex.timed = !!timed;
         return ex;
       });
     },
@@ -531,6 +540,7 @@
 
     /**
      * Main set: { exerciseId, weightKg (null = bodyweight, negative = assisted), reps, rpe?, note? }
+     *   or for a timed exercise: { exerciseId, weightKg, durationSec } (reps left out).
      * Drop set: { parentId, weightKg, reps } (exercise comes from the parent).
      */
     addSet(sessionId, input) {
@@ -542,7 +552,8 @@
           parentId: input.parentId || null,
           exerciseId: input.exerciseId,
           weightKg: input.weightKg === undefined ? null : input.weightKg,
-          reps: input.reps,
+          reps: input.reps == null ? null : input.reps,
+          durationSec: input.durationSec == null ? null : input.durationSec,
           rpe: input.rpe === undefined ? null : input.rpe,
           note: cleanName(input.note || ''),
           loggedAt: input.loggedAt || nowIso(),
@@ -557,14 +568,15 @@
           checkRpe(set.rpe);
         }
         checkWeight(set.weightKg);
-        checkReps(set.reps);
+        if (set.durationSec != null) checkDuration(set.durationSec);
+        if (set.durationSec == null || set.reps != null) checkReps(set.reps);
         s.sets.push(set);
         if (!s.exerciseOrder.includes(set.exerciseId)) s.exerciseOrder.push(set.exerciseId);
         return set;
       });
     },
 
-    /** Editable fields: weightKg, reps, rpe, note. */
+    /** Editable fields: weightKg, reps, durationSec, rpe, note. */
     updateSet(sessionId, setId, patch) {
       return write((d) => {
         const s = findSession(d, sessionId);
@@ -572,7 +584,14 @@
         assert(set, 'That set no longer exists.');
         const p = patch || {};
         if (p.weightKg !== undefined) { checkWeight(p.weightKg); set.weightKg = p.weightKg; }
-        if (p.reps !== undefined) { checkReps(p.reps); set.reps = p.reps; }
+        if (p.durationSec !== undefined) {
+          if (p.durationSec !== null) checkDuration(p.durationSec);
+          set.durationSec = p.durationSec;
+        }
+        if (p.reps !== undefined) {
+          if (p.reps !== null || set.durationSec == null) checkReps(p.reps);
+          set.reps = p.reps;
+        }
         if (p.rpe !== undefined && set.kind === 'main') { checkRpe(p.rpe); set.rpe = p.rpe; }
         if (p.note !== undefined) set.note = cleanName(p.note);
         return set;

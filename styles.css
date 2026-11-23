@@ -464,6 +464,14 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .last-row { margin: 20px 16px 0; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
 .last-row b { color: var(--fg); font-weight: 600; }
 
+/* First-launch setup card */
+.setup-card { margin: 16px; padding: 16px; border: 1px solid var(--accent-text); border-radius: var(--r); background: var(--surface); display: grid; gap: 6px; }
+.setup-card .when { font-size: 13px; font-weight: 600; color: var(--accent-text); }
+.setup-card .what { font-family: var(--f-num); font-size: 26px; font-weight: 700; line-height: 1.15; }
+.setup-card .detail { color: var(--muted); font-size: 14px; max-width: 52ch; }
+.setup-card .btn { margin-top: 10px; }
+.setup-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; }
+
 /* ---------- Workout screen ---------- */
 .w-top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px;
   padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; background: var(--surface); border-bottom: 1px solid var(--line); }
@@ -494,7 +502,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .grp { border-bottom: 1px solid var(--line); display: flex; flex-direction: column; }
 .set-row, .drop-row {
   display: grid;
-  grid-template-columns: 24px 58px 12px 30px minmax(0, 1fr) auto 36px;
+  grid-template-columns: 24px 58px 12px minmax(30px, auto) minmax(0, 1fr) auto 36px;
   align-items: center;
   column-gap: 8px;
   font-family: var(--f-num);
@@ -588,10 +596,15 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
   .w-input .sign { width: 28px; }
   .reps { grid-template-columns: 42px minmax(0, 1fr) 42px; }
   .reps output { font-size: 22px; }
-  .set-row, .drop-row { grid-template-columns: 22px 62px 10px 30px minmax(0, 1fr) auto 32px; column-gap: 6px; }
+  .set-row, .drop-row { grid-template-columns: 22px 62px 10px minmax(30px, auto) minmax(0, 1fr) auto 32px; column-gap: 6px; }
 }
 .log-btn { width: 100%; min-height: 58px; border-radius: var(--r); background: var(--accent); color: var(--accent-ink); font-size: 18px; font-weight: 700; }
 .log-btn:active { filter: brightness(0.92); }
+
+/* Timed exercises: the time sits where reps would be; tapping it starts the stopwatch. */
+.reps.time .time-out { display: grid; place-items: center; font-size: 24px; font-weight: 600; border-radius: 0; }
+.reps.time .time-out output { font-family: var(--f-num); font-variant-numeric: tabular-nums; }
+.reps.time .time-out:active { background: var(--sunk); }
 
 /* ---------- Rest timer ---------- */
 .rest-row { display: flex; align-items: center; gap: 10px; min-height: 44px; }
@@ -705,10 +718,10 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .sc-ex { padding: 8px 0 6px; border-bottom: 1px solid var(--line); }
 .sc-ex:last-child { border-bottom: 0; }
 .sc-ex h3 { margin: 0 0 2px; padding: 0 12px; font-size: 14px; font-weight: 700; }
-.sc-ex .set-row { padding: 3px 12px; min-height: 30px; grid-template-columns: 24px 58px 12px 30px minmax(0, 1fr) auto; }
+.sc-ex .set-row { padding: 3px 12px; min-height: 30px; grid-template-columns: 24px 58px 12px minmax(30px, auto) minmax(0, 1fr) auto; }
 .sc-ex .set-row .w, .sc-ex .set-row .r { font-size: 16px; }
 .sc-ex .set-row .n { width: 22px; height: 22px; }
-.sc-ex .drop-row { padding: 2px 12px; grid-template-columns: 24px 58px 12px 30px minmax(0, 1fr) auto; background: transparent; }
+.sc-ex .drop-row { padding: 2px 12px; grid-template-columns: 24px 58px 12px minmax(30px, auto) minmax(0, 1fr) auto; background: transparent; }
 .sc-ex .set-note { padding: 0 12px 2px 44px; }
 .bw-list .row { min-height: 48px; }
 .bw-list .num-r { font-family: var(--f-num); font-variant-numeric: tabular-nums; font-weight: 600; }

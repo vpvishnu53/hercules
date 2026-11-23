@@ -7,6 +7,9 @@
  * Rules
  *  - Two kinds of milestone: a weight PR (heaviest typed weight so far) and a
  *    rep PR (most reps so far at exactly the same typed weight).
+ *  - Timed exercises (planks, dead hangs) log a time instead of reps. For
+ *    them the "rep PR" is the longest hold at the same weight; every rule
+ *    below uses the set's amount: its seconds if timed, else its reps.
  *  - Typed weight only: blank (bodyweight) counts as 0, so +10 beats
  *    bodyweight, and -20 (less assistance) beats -30.
  *  - Baseline: the first two sessions that contain at least one main set of an
@@ -29,6 +32,9 @@
   const BASELINE_SESSIONS = 2;
 
   const typedWeight = (set) => (set.weightKg == null ? 0 : set.weightKg);
+  /** Reps, or seconds for a timed set. */
+  const amount = (set) => (set.durationSec != null ? set.durationSec : set.reps);
+  const isTimed = (set) => set.durationSec != null;
   const sameWeight = (a, b) => Math.abs(a - b) <= TOLERANCE_KG;
 
   function sortSessions(sessions) {
@@ -42,12 +48,13 @@
   /**
    * Every milestone for one exercise across all sessions, oldest first.
    * Each: { exerciseId, sessionId, setId, type: 'weight'|'reps', weightKg,
-   *         reps, date, loggedAt, previous: { weightKg, reps } }
+   *         reps, durationSec, date, loggedAt, previous: { weightKg, reps, durationSec } }
+   * type 'reps' means "most at this weight": reps, or seconds for timed sets.
    * weightKg is the typed weight (null stays null for bodyweight).
    */
   function computeMilestones(sessions, exerciseId) {
     const out = [];
-    const history = [];      // { w, reps } of all earlier main sets
+    const history = [];      // { w, n, timed } of all earlier main sets (n = reps or seconds)
     let sessionCount = 0;
 
     for (const session of sortSessions(sessions)) {
@@ -63,23 +70,25 @@
           if (w > best + TOLERANCE_KG) {
             out.push(record('weight', set, session, exerciseId, {
               weightKg: best,
-              reps: Math.max(...history.filter((h) => sameWeight(h.w, best)).map((h) => h.reps)),
+              ...prevAmount(Math.max(...history.filter((h) => sameWeight(h.w, best)).map((h) => h.n)), isTimed(set)),
             }));
           } else {
             const atWeight = history.filter((h) => sameWeight(h.w, w));
             if (atWeight.length) {
-              const bestReps = Math.max(...atWeight.map((h) => h.reps));
-              if (set.reps > bestReps) {
-                out.push(record('reps', set, session, exerciseId, { weightKg: w, reps: bestReps }));
+              const bestN = Math.max(...atWeight.map((h) => h.n));
+              if (amount(set) > bestN) {
+                out.push(record('reps', set, session, exerciseId, { weightKg: w, ...prevAmount(bestN, isTimed(set)) }));
               }
             }
           }
         }
-        history.push({ w, reps: set.reps });
+        history.push({ w, n: amount(set), timed: isTimed(set) });
       }
     }
     return out;
   }
+
+  const prevAmount = (n, timed) => (timed ? { reps: null, durationSec: n } : { reps: n, durationSec: null });
 
   function record(type, set, session, exerciseId, previous) {
     return {
@@ -88,7 +97,8 @@
       setId: set.id,
       type,
       weightKg: set.weightKg == null ? null : set.weightKg,
-      reps: set.reps,
+      reps: set.reps == null ? null : set.reps,
+      durationSec: set.durationSec == null ? null : set.durationSec,
       date: session.date,
       loggedAt: set.loggedAt || '',
       previous,
@@ -114,7 +124,7 @@
       .sort((a, b) => (a.date + a.loggedAt).localeCompare(b.date + b.loggedAt));
   }
 
-  /** Heaviest typed weight per session for the weight chart: [{ date, sessionId, weightKg, reps }] */
+  /** Heaviest typed weight per session for the weight chart: [{ date, sessionId, weightKg, reps, durationSec }] */
   function maxWeightSeries(sessions, exerciseId) {
     const out = [];
     for (const session of sortSessions(sessions)) {
@@ -123,22 +133,26 @@
       let top = sets[0];
       for (const s of sets) {
         const d = typedWeight(s) - typedWeight(top);
-        if (d > TOLERANCE_KG || (Math.abs(d) <= TOLERANCE_KG && s.reps > top.reps)) top = s;
+        if (d > TOLERANCE_KG || (Math.abs(d) <= TOLERANCE_KG && amount(s) > amount(top))) top = s;
       }
-      out.push({ date: session.date, sessionId: session.id, weightKg: top.weightKg == null ? null : top.weightKg, reps: top.reps });
+      out.push({ date: session.date, sessionId: session.id, weightKg: top.weightKg == null ? null : top.weightKg,
+        reps: top.reps == null ? null : top.reps, durationSec: top.durationSec == null ? null : top.durationSec });
     }
     return out;
   }
 
-  /** Most reps per session at one typed weight, for the reps chart: [{ date, sessionId, reps }] */
+  /**
+   * Most reps (or longest time) per session at one typed weight, for the reps chart:
+   * [{ date, sessionId, reps, timed }] where reps holds seconds when timed.
+   */
   function repsAtWeightSeries(sessions, exerciseId, weightKg) {
     const target = weightKg == null ? 0 : weightKg;
     const out = [];
     for (const session of sortSessions(sessions)) {
-      const reps = mainSetsOf(session, exerciseId)
-        .filter((s) => sameWeight(typedWeight(s), target))
-        .map((s) => s.reps);
-      if (reps.length) out.push({ date: session.date, sessionId: session.id, reps: Math.max(...reps) });
+      const sets = mainSetsOf(session, exerciseId).filter((s) => sameWeight(typedWeight(s), target));
+      if (sets.length) {
+        out.push({ date: session.date, sessionId: session.id, reps: Math.max(...sets.map(amount)), timed: sets.some(isTimed) });
+      }
     }
     return out;
   }

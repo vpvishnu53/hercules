@@ -6,7 +6,7 @@
  * in fonts/ and cached with the app. Workout data is not here: it lives in
  * localStorage via storage.js.
  */
-const VERSION = 'v0.13';
+const VERSION = 'v0.14';
 const APP_CACHE = `wt-app-${VERSION}`;
 const FONT_CACHE = 'wt-fonts-v1';
 const APP_FILES = [
