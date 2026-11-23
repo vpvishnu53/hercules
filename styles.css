@@ -18,6 +18,12 @@
   --accent-text: #0F6B3A;
   --danger: #B3261E;
   --backdrop: rgba(15, 26, 19, 0.45);
+  --accent-hover: #0E6639;
+  --hover: #EDF1EE;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 110ms;
+  --dur: 180ms;
 
   --r: 4px;
   --f-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -31,6 +37,7 @@
     --bg: #0E1411; --surface: #151D18; --sunk: #1A241E; --line: #23302A; --line-strong: #3C4E43;
     --fg: #E7EFE9; --muted: #8EA095; --accent: #3CC27A; --accent-ink: #04140B; --accent-text: #5BD493;
     --danger: #FF7B72; --backdrop: rgba(0, 0, 0, 0.6);
+    --accent-hover: #5BD493; --hover: #1C2620;
     color-scheme: dark;
   }
 }
@@ -38,6 +45,7 @@
   --bg: #0E1411; --surface: #151D18; --sunk: #1A241E; --line: #23302A; --line-strong: #3C4E43;
   --fg: #E7EFE9; --muted: #8EA095; --accent: #3CC27A; --accent-ink: #04140B; --accent-text: #5BD493;
   --danger: #FF7B72; --backdrop: rgba(0, 0, 0, 0.6);
+  --accent-hover: #5BD493; --hover: #1C2620;
   color-scheme: dark;
 }
 
@@ -621,6 +629,121 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .placeholder strong { color: var(--fg); font-size: 16px; }
 .fatal { padding: 24px 16px; display: grid; gap: 12px; }
 .fatal h1 { margin: 0; font-size: 22px; }
+
+/* ================================================================== */
+/* Motion                                                              */
+/* Short and quiet: things respond to touch, new things slide in, and  */
+/* hover states appear only with a mouse. All of it switches off when  */
+/* the system asks for reduced motion (rule at the end of this file).  */
+/* ================================================================== */
+
+/* ---------- Transitions on interactive things ---------- */
+.btn, .chip, .seg button, .row, .picker-item, .picker-create, .ex-chip, .icon-btn, .row-menu,
+.text-btn, .keep, .log-btn, .reps button, .stepper-sm button, .drop-add button, .w-top .btn-out,
+.w-top .finish, .cal .day, .tabbar a, .w-input .sign, .rest-row > button, .pr-pop, .input, .select, .w-input {
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur-fast) var(--ease),
+    filter var(--dur) var(--ease);
+}
+
+/* ---------- Press feedback (touch and mouse) ---------- */
+.btn:active, .chip:active, .seg button:active, .log-btn:active, .keep:active, .ex-chip:active,
+.w-top .btn-out:active, .drop-add button:active, .cal .day:active, .reps button:active,
+.stepper-sm button:active, .icon-btn:active, .row-menu:active, .w-input .sign:active {
+  transform: scale(0.96);
+}
+.log-btn:active { transform: scale(0.98); filter: none; }
+.row:active, .picker-item:active { background: var(--hover); }
+
+/* ---------- Hover (mouse and trackpad only) ---------- */
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover, .log-btn:hover { background: var(--accent-hover); }
+  .btn-secondary:hover, .chip:not([aria-pressed="true"]):hover, .seg button:not([aria-pressed="true"]):hover,
+  .w-top .btn-out:hover, .drop-add button:hover { background: var(--hover); border-color: var(--fg); }
+  .btn-danger:hover { background: var(--hover); }
+  a.row:hover, button.row:hover, .picker-item:hover, .picker-create:hover { background: var(--hover); }
+  .icon-btn:not(:disabled):hover, .row-menu:hover, .w-input .sign:hover { background: var(--hover); color: var(--fg); }
+  .text-btn:hover, .w-top .finish:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
+  .keep:hover { background: var(--accent-text); color: var(--surface); }
+  .ex-chip:not([aria-current="true"]):hover { color: var(--fg); border-color: var(--line-strong); }
+  .reps button:hover, .stepper-sm button:hover { background: var(--hover); }
+  .cal .day:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .cal .day[aria-pressed="true"]:hover { box-shadow: inset 0 0 0 2px var(--accent-text); }
+  .tabbar a:not([aria-current="page"]):hover { color: var(--fg); }
+  .set-row:hover, .drop-row:hover { background: var(--hover); }
+  .grp .drop-row:hover { background: var(--hover); }
+  .input:hover, .select:hover, .w-input:hover { border-color: var(--fg); }
+  .chart .hit:hover { fill: var(--accent); fill-opacity: 0.12; }
+  .pr-pop:hover { filter: brightness(1.05); }
+}
+
+/* ---------- Bottom tab bar: the accent bar slides between tabs ---------- */
+.tabbar a { position: relative; }
+.tabbar a[aria-current="page"] { box-shadow: none; }
+.tabbar a::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform 240ms var(--ease);
+}
+.tabbar a[aria-current="page"]::before { transform: scaleX(1); }
+.tabbar a svg { transition: transform var(--dur) var(--ease); }
+.tabbar a[aria-current="page"] svg { transform: translateY(-1px); }
+
+/* ---------- Switch knob ---------- */
+.switch { transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.switch::after { transition: left 200ms var(--ease), background-color var(--dur) var(--ease); }
+
+/* ---------- Screen change ---------- */
+#view.view-enter > * { animation: view-in 220ms var(--ease) both; }
+@keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* Sticky bars must not move, only fade. */
+#view.view-enter > .screen-head, #view.view-enter > .w-top, #view.view-enter > .entry,
+#view.view-enter > .start-bar { animation-name: fade-in; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- Sheets: backdrop fades, sheet slides up and back down ---------- */
+.backdrop { animation: fade-in var(--dur) var(--ease); }
+.sheet { animation: sheet-in 220ms var(--ease); }
+@keyframes sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+.backdrop.closing { animation: fade-out 160ms var(--ease) forwards; pointer-events: none; }
+.sheet.closing { animation: sheet-out 160ms var(--ease) forwards; pointer-events: none; }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes sheet-out { to { transform: translateY(100%); } }
+
+/* ---------- Rest timer panel ---------- */
+#timer-overlay:not([hidden]) { animation: fade-in var(--dur) var(--ease); }
+.timer-panel { animation: panel-in 240ms var(--ease); }
+@keyframes panel-in { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
+.dial .arc { transition: stroke-dasharray 200ms linear; }
+
+/* ---------- New things on the workout screen ---------- */
+.grp.enter { animation: row-in 280ms var(--ease) both, row-flash 900ms ease-out both; }
+.drop-row.enter { animation: row-in 240ms var(--ease) both, row-flash 900ms ease-out both; }
+@keyframes row-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes row-flash { from { background-color: var(--hover); } to { background-color: transparent; } }
+.drop-row.enter { animation-name: row-in; }
+.grp.enter .pr-badge { animation: badge-pop 420ms cubic-bezier(0.3, 1.6, 0.5, 1) 120ms both; }
+@keyframes badge-pop { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: none; } }
+.drop-edit.enter { animation: row-in 200ms var(--ease) both; }
+.next-card.enter { animation: card-in 320ms var(--ease) both; }
+@keyframes card-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.pr-pop { animation: pr-in 360ms cubic-bezier(0.3, 1.4, 0.5, 1); }
+.pr-pop svg { animation: badge-pop 480ms cubic-bezier(0.3, 1.6, 0.5, 1) 120ms both; }
+
+/* ---------- Charts: the line draws itself, dots grow when picked ---------- */
+.chart .ln.draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw-line 700ms var(--ease) 80ms forwards; }
+@keyframes draw-line { to { stroke-dashoffset: 0; } }
+.chart .pt { transition: r 160ms var(--ease), stroke-width 160ms var(--ease); }
+.chart .pt.sel { r: 7px; }
+.chart-detail > * { animation: fade-in var(--dur) var(--ease); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

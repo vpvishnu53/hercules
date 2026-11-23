@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.8.1';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.9';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -135,7 +135,16 @@
   const go = (hash) => { if (location.hash !== hash) location.hash = hash; else render(); };
 
   let renderToken = 0;
-  async function render({ keepScroll = false } = {}) {
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  /** Small "bump" on a number that just changed (reps, drop reps). */
+  function bump(el) {
+    if (!el || reduceMotion.matches || !el.animate) return;
+    el.animate([{ transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: 170, easing: 'cubic-bezier(.2,.7,.2,1)' });
+  }
+
+  /** animate: fade the new screen in (used when moving to a different screen, not on in-place updates). */
+  async function render({ keepScroll = false, animate = false } = {}) {
     const token = ++renderToken;
     const y = window.scrollY;
     const screen = screens[state.route.tab];
@@ -147,8 +156,14 @@
       html = `<div class="fatal"><h1>Something went wrong</h1><p>${esc(err.message)}</p></div>`;
     }
     if (token !== renderToken) return;          // a newer render started
-    $('#view').innerHTML = html;
-    if (screen.after) screen.after($('#view'));
+    const view = $('#view');
+    view.classList.remove('view-enter');         // in-place updates never fade
+    view.innerHTML = html;
+    if (animate) {
+      void view.offsetWidth;                     // restart the animation
+      view.classList.add('view-enter');
+    }
+    if (screen.after) screen.after(view);
     $$('.tabbar a').forEach((a) => {
       if (a.dataset.tab === state.route.tab) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
@@ -161,7 +176,8 @@
     state.route = parseRoute();
     if (prev.tab === 'settings' && prev.parts[0] === 'split' && state.route.parts[0] !== 'split') state.splitDraft = null;
     closeSheet();
-    render({ keepScroll: prev.tab === 'calendar' && state.route.tab === 'calendar' });
+    const sameCalendar = prev.tab === 'calendar' && state.route.tab === 'calendar';
+    render({ keepScroll: sameCalendar, animate: !sameCalendar });
   });
 
   /* ------------------------------------------------------------------ */
@@ -225,8 +241,14 @@
     const { resolve, returnFocus } = sheet;
     sheet = null;
     const root = $('#sheet-root');
-    root.hidden = true;
-    root.innerHTML = '';
+    // Slide the sheet out, then remove it (unless another sheet has opened meanwhile).
+    const leaving = [...root.children];
+    leaving.forEach((n) => n.classList.add('closing'));
+    const finish = () => {
+      leaving.forEach((n) => n.remove());
+      if (!sheet) { root.hidden = true; }
+    };
+    if (reduceMotion.matches) finish(); else setTimeout(finish, 160);
     document.body.classList.remove('sheet-open');
     if (returnFocus && document.contains(returnFocus)) returnFocus.focus({ preventScroll: true });
     if (!silent) resolve(result);
@@ -573,7 +595,7 @@
   async function startWorkout(sessionTypeId) {
     await Store.startSession({ sessionTypeId });
     Object.assign(state, { entry: null, dropDraft: null, startPick: null });
-    await render();
+    await render({ animate: true });
   }
 
   /* ---------- Workout screen ---------- */
@@ -630,7 +652,7 @@
       const drops = dropsOf(session, set.id);
       const pr = prBySet[set.id];
       const dd = state.dropDraft && state.dropDraft.parentId === set.id ? state.dropDraft : null;
-      return `<div class="grp">
+      return `<div class="grp${set.id === state.justLogged ? ' enter' : ''}">
         <div class="set-row">
           <span class="n">${i + 1}</span>
           <span class="w">${weightHtml(set.weightKg)}</span><span class="x">×</span><span class="r">${set.reps}</span>
@@ -639,11 +661,11 @@
           <button class="row-menu" data-action="set-menu" data-id="${esc(set.id)}" data-n="${i + 1}" aria-label="Set ${i + 1} options">⋯</button>
         </div>
         ${set.note ? `<div class="set-note">${esc(set.note)}</div>` : ''}
-        ${drops.map((d) => `<div class="drop-row">
+        ${drops.map((d) => `<div class="drop-row${d.id === state.justLogged ? ' enter' : ''}">
           <span class="arrow">↳</span><span class="w">${weightHtml(d.weightKg)}</span><span class="x">×</span><span class="r">${d.reps}</span>
           <span class="tag-d">drop</span><span></span>
           <button class="row-menu" data-action="set-menu" data-id="${esc(d.id)}" aria-label="Drop set options">⋯</button></div>`).join('')}
-        ${dd ? `<div class="drop-edit">
+        ${dd ? `<div class="drop-edit${dd.fresh ? ' enter' : ''}">
             <label class="visually-hidden" for="drop-w">Drop weight</label>
             <input class="input" id="drop-w" type="text" inputmode="decimal" autocomplete="off" value="${esc(dd.weightText)}" placeholder="BW" data-input="drop-w">
             <span class="unit">${Units.unit}</span>
@@ -664,7 +686,10 @@
     if (splitItem && curMain.length >= splitItem.targetSets && !state.nextDismissed[`${session.id}|${cur}`]) {
       const next = st.items.find((i) => i.exerciseId !== cur && !mainSets(session, i.exerciseId).length);
       if (next) {
-        nextHtml = `<div class="next-card">
+        const key = `${session.id}|${cur}|${next.exerciseId}`;
+        const fresh = state.nextSeen !== key;
+        state.nextSeen = key;
+        nextHtml = `<div class="next-card${fresh ? ' enter' : ''}">
           <div class="t">Next: <b>${esc(exerciseName(next.exerciseId))}</b> <span>· ${plural(next.targetSets, 'set')}</span></div>
           <button class="keep" data-action="next-keep" data-id="${esc(next.exerciseId)}">Keep</button>
           <button class="icon-btn" data-action="next-dismiss" aria-label="Hide suggestion">${ICON.x}</button>
@@ -727,6 +752,7 @@
     const e = state.entry;
     e.reps = Math.min(999, Math.max(1, e.reps + Number(el.dataset.step)));
     $('#reps-out').textContent = e.reps;
+    bump($('#reps-out'));
   };
   actions['w-sign'] = () => {
     const e = state.entry;
@@ -768,8 +794,10 @@
       const rt = state.settings.restTimer;
       if (rt.enabled && rt.autoStart) timerStart(rt.durationSec);
       else if (timer.done) timerStop();
+      state.justLogged = set.id;               // slides the new row in
       await render({ keepScroll: true });
-      window.scrollTo(0, document.documentElement.scrollHeight);
+      state.justLogged = null;
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
     } finally {
       state.busy = false;
     }
@@ -781,7 +809,7 @@
     const session = await Store.getActiveSession();
     await Store.updateSession(session.id, { currentExerciseId: id });
     state.dropDraft = null;
-    await render();
+    await render({ animate: true });
   }
   actions['ex-switch'] = (el) => setCurrentExercise(el.dataset.id);
   actions['next-keep'] = (el) => setCurrentExercise(el.dataset.id);
@@ -874,14 +902,16 @@
       const v = Math.round((Units.display(base.weightKg) * 0.8) / step) * step;
       text = v > 0 ? String(v) : '';
     }
-    state.dropDraft = { parentId: parent.id, weightText: text, reps: base.reps };
+    state.dropDraft = { parentId: parent.id, weightText: text, reps: base.reps, fresh: true };
     await render({ keepScroll: true });
+    state.dropDraft.fresh = false;
   };
   inputs['drop-w'] = (el) => { state.dropDraft.weightText = el.value; };
   actions['drop-reps'] = (el) => {
     const d = state.dropDraft;
     d.reps = Math.min(999, Math.max(1, d.reps + Number(el.dataset.step)));
     $('#drop-r').textContent = d.reps;
+    bump($('#drop-r'));
   };
   actions['drop-cancel'] = () => { state.dropDraft = null; return render({ keepScroll: true }); };
   actions['drop-save'] = async () => {
@@ -889,11 +919,13 @@
     const w = Units.parse(d.weightText);
     if (w.error) throw new Error(w.error);
     const session = await Store.getActiveSession();
-    await Store.addSet(session.id, { parentId: d.parentId, weightKg: w.kg, reps: d.reps });
+    const drop = await Store.addSet(session.id, { parentId: d.parentId, weightKg: w.kg, reps: d.reps });
     state.dropDraft = null;
     const rt = state.settings.restTimer;
     if (rt.enabled && rt.autoStart) timerStart(rt.durationSec);
+    state.justLogged = drop.id;
     await render({ keepScroll: true });
+    state.justLogged = null;
   };
 
   /* ---------- PR banner ---------- */
@@ -1423,7 +1455,7 @@
     const xt = dateTicks(Math.ceil(x0), Math.floor(x1)).map(([x, label]) =>
       `<text class="tick-label" x="${f(sx(x))}" y="${H - 8}" text-anchor="middle">${esc(label)}</text>`).join('');
     const path = line && points.length > 1
-      ? `<path class="ln" d="${points.map((p, i) => `${i ? 'L' : 'M'}${f(sx(p.x))} ${f(sy(p.y))}`).join(' ')}"/>` : '';
+      ? `<path class="ln draw" pathLength="1" d="${points.map((p, i) => `${i ? 'L' : 'M'}${f(sx(p.x))} ${f(sy(p.y))}`).join(' ')}"/>` : '';
     const dots = points.map((p, i) => `<circle class="pt${p.hollow ? ' hollow' : ''}" data-pt="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="${p.hollow ? 4.5 : 5}"/>`).join('');
     const hits = points.map((p, i) => `<circle class="hit" tabindex="0" role="button" aria-label="Point ${i + 1} of ${points.length}" data-action="chart-point" data-i="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="13"/>`).join('');
 
