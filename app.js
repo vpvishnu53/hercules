@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.11.1';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.11.2';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -250,6 +250,8 @@
 
   (function swipeTabs() {
     const view = $('#view');
+    // Listen on the whole app (it fills the screen), not just #view, which is only as tall as its content.
+    const area = $('#app');
     const EDGE = 24;
     let s = null;
     let busy = false;
@@ -263,14 +265,14 @@
       if (animated) setTimeout(() => { if (!s) view.style.transition = ''; }, 240);
     }
 
-    view.addEventListener('touchstart', (ev) => {
+    area.addEventListener('touchstart', (ev) => {
       if (busy || ev.touches.length !== 1 || sheet || !$('#timer-overlay').hidden) return;
       const t = ev.touches[0];
       if (t.clientX < EDGE || t.clientX > window.innerWidth - EDGE || blocked(ev.target)) return;
       s = { x0: t.clientX, y0: t.clientY, t0: performance.now(), dx: 0, lock: null, idx: TABS.indexOf(state.route.tab) };
     }, { passive: true });
 
-    view.addEventListener('touchmove', (ev) => {
+    area.addEventListener('touchmove', (ev) => {
       if (!s) return;
       const t = ev.touches[0];
       const dx = t.clientX - s.x0;
@@ -312,8 +314,8 @@
       moveTabIndicator(target);
       setTimeout(finish, 170);                 // render() clears these styles when the new tab is in
     }
-    view.addEventListener('touchend', end);
-    view.addEventListener('touchcancel', () => { if (s) { s = null; reset(true); } });
+    area.addEventListener('touchend', end);
+    area.addEventListener('touchcancel', () => { if (s) { s = null; reset(true); } });
   })();
 
   /* ------------------------------------------------------------------ */
