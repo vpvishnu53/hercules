@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.12';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.13';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -156,13 +156,29 @@
   /* ------------------------------------------------------------------ */
 
   let toastTimer = null;
-  function toast(message, { error = false } = {}) {
+  /** action: { label, run } adds a button (e.g. Undo) and keeps the toast up longer. */
+  function toast(message, { error = false, action = null } = {}) {
     const t = $('#toast');
-    t.textContent = message;
+    t.textContent = '';
+    const msg = document.createElement('span');
+    msg.textContent = message;
+    t.append(msg);
+    if (action) {
+      const b = document.createElement('button');
+      b.className = 'toast-action';
+      b.textContent = action.label;
+      b.addEventListener('click', () => {
+        t.classList.remove('show', 'has-action');
+        clearTimeout(toastTimer);
+        runHandler(action.run);
+      }, { once: true });
+      t.append(b);
+    }
     t.classList.toggle('error', error);
+    t.classList.toggle('has-action', !!action);
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), error ? 4200 : 2200);
+    toastTimer = setTimeout(() => t.classList.remove('show', 'has-action'), action ? 6000 : error ? 4200 : 2200);
   }
 
   /* ------------------------------------------------------------------ */
@@ -197,7 +213,7 @@
    */
   async function render({ keepScroll = false, animate = false } = {}) {
     const token = ++renderToken;
-    const y = window.scrollY;
+    const y = $('#view').scrollTop;     // #view is the scrolling area
     const screen = screens[state.route.tab];
     let html;
     try {
@@ -221,7 +237,7 @@
       else a.removeAttribute('aria-current');
     });
     moveTabIndicator(TABS.indexOf(state.route.tab));
-    window.scrollTo(0, keepScroll ? y : 0);
+    view.scrollTop = keepScroll ? y : 0;
   }
 
   window.addEventListener('hashchange', () => {
@@ -659,7 +675,7 @@
       exactKg: src ? src.weightKg : undefined,
       weightText: src ? inputText(src.weightKg) : '',
       reps: src ? src.reps : 8,
-      rpe: src && src.rpe != null ? src.rpe : 8,
+      rpe: null,                         // RPE starts empty for every set; it only gets a value when the slider is used
       note: '',
       showNote: false,
     };
@@ -851,12 +867,13 @@
 
     const rpe = state.settings.rpeEnabled ? `
       <div>
-        <div class="rpe-row">
+        <div class="rpe-row${e.rpe == null ? ' empty' : ''}">
           <label for="rpe-in">RPE</label>
-          <input id="rpe-in" type="range" min="6" max="10" step="0.5" value="${e.rpe}" data-input="rpe-in">
-          <output class="num" id="rpe-out" for="rpe-in">${e.rpe}</output>
+          <input id="rpe-in" type="range" min="5.5" max="10" step="0.5" value="${e.rpe == null ? 5.5 : e.rpe}" data-input="rpe-in"
+            aria-valuetext="${e.rpe == null ? 'No RPE' : `RPE ${e.rpe}`}">
+          <output class="num" id="rpe-out" for="rpe-in">${e.rpe == null ? '—' : e.rpe}</output>
         </div>
-        <div class="rpe-ticks"><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+        <div class="rpe-ticks">${['—', 6, 7, 8, 9, 10].map((t, i) => `<span style="--f:${i === 0 ? 0 : (t - 5.5) / 4.5}">${t}</span>`).join('')}</div>
       </div>` : '';
 
     return `${top}${notice}${stripHtml}
@@ -867,6 +884,7 @@
       ${curMain.length ? `<div class="sets">${setsHtml}</div>` : ''}
       ${nextHtml}
       <div class="entry">
+        <div class="corner-slot" data-corner-slot>${cornerTimerHtml()}</div>
         <div data-rest-slot>${restRowHtml()}</div>
         <div class="fields">
           <div>
@@ -890,7 +908,8 @@
         <div class="note-row">${e.showNote
           ? `<label class="visually-hidden" for="note-in">Note for this set</label>
              <input class="input" id="note-in" type="text" autocomplete="off" placeholder="Note for this set" value="${esc(e.note)}" data-input="note-in">`
-          : '<button class="text-btn" data-action="note-open">+ note</button>'}</div>
+          : '<button class="text-btn" data-action="note-open">+ note</button>'}
+          <button class="text-btn plates-btn" data-action="plates">Plates</button></div>
         <button class="log-btn" data-action="log-set">Log set ${curMain.length + 1}</button>
       </div>`;
   }
@@ -899,7 +918,14 @@
 
   inputs['w-in'] = (el) => { state.entry.weightText = el.value; };
   inputs['note-in'] = (el) => { state.entry.note = el.value; };
-  inputs['rpe-in'] = (el) => { state.entry.rpe = Number(el.value); $('#rpe-out').textContent = el.value; };
+  // The far-left position (5.5) means "no RPE"; 6 to 10 are values.
+  inputs['rpe-in'] = (el) => {
+    const v = Number(el.value);
+    state.entry.rpe = v < 6 ? null : v;
+    $('#rpe-out').textContent = state.entry.rpe == null ? '—' : String(v);
+    el.setAttribute('aria-valuetext', state.entry.rpe == null ? 'No RPE' : `RPE ${v}`);
+    el.closest('.rpe-row').classList.toggle('empty', state.entry.rpe == null);
+  };
   actions['reps-step'] = (el) => {
     const e = state.entry;
     e.reps = Math.min(999, Math.max(1, e.reps + Number(el.dataset.step)));
@@ -942,14 +968,15 @@
       } else if (navigator.vibrate) {
         navigator.vibrate(15);
       }
-      Object.assign(e, { exactKg: set.weightKg, weightText: inputText(set.weightKg), note: '', showNote: false });
+      Object.assign(e, { exactKg: set.weightKg, weightText: inputText(set.weightKg), note: '', showNote: false, rpe: null });
       const rt = state.settings.restTimer;
       if (rt.enabled && rt.autoStart) timerStart(rt.durationSec);
       else if (timer.done) timerStop();
       state.justLogged = set.id;               // slides the new row in
       await render({ keepScroll: true });
       state.justLogged = null;
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+      const v = $('#view');
+      v.scrollTo({ top: v.scrollHeight, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
     } finally {
       state.busy = false;
     }
@@ -1025,20 +1052,28 @@
     toast('Set updated');
   }
 
+  /** Deletes straight away and offers Undo for a few seconds instead of asking first. */
   async function deleteSet(session, set) {
-    const drops = set.kind === 'main' ? dropsOf(session, set.id).length : 0;
-    const ok = await confirmSheet({
-      title: set.kind === 'drop' ? 'Delete this drop set?' : 'Delete this set?',
-      body: drops ? `Its ${plural(drops, 'drop set')} will be deleted too.` : '',
-      confirmLabel: 'Delete',
-      danger: true,
-    });
-    if (!ok) return;
+    const removed = session.sets
+      .map((x, index) => ({ set: x, index }))
+      .filter(({ set: x }) => x.id === set.id || x.parentId === set.id);
     await Store.deleteSet(session.id, set.id);
     if (state.dropDraft && state.dropDraft.parentId === set.id) state.dropDraft = null;
     await recomputeMilestones([set.exerciseId]);
     await render({ keepScroll: true });
-    toast('Set deleted');
+    const drops = removed.length - 1;
+    const what = set.kind === 'drop' ? 'Drop set deleted' : drops ? `Set and ${plural(drops, 'drop')} deleted` : 'Set deleted';
+    toast(what, {
+      action: {
+        label: 'Undo',
+        run: async () => {
+          await Store.restoreSets(session.id, removed);
+          await recomputeMilestones([set.exerciseId]);
+          await render({ keepScroll: true });
+          toast('Set restored');
+        },
+      },
+    });
   }
 
   /* ---------- Drop sets ---------- */
@@ -1080,6 +1115,74 @@
     state.justLogged = null;
   };
 
+
+  /* ---------- Plate calculator ---------- */
+  /* Plates per side for the weight in the entry field, on a bar the user picks. */
+
+  const PLATES = { kg: [25, 20, 15, 10, 5, 2.5, 1.25], lb: [45, 35, 25, 10, 5, 2.5] };
+  const BARS = { kg: [20, 15, 10], lb: [45, 35, 25] };
+  const PLATE_SIZE = { 25: 1, 20: 0.92, 15: 0.82, 10: 0.7, 5: 0.54, 2.5: 0.42, 1.25: 0.34, 45: 1, 35: 0.88 };
+
+  /** Greedy split of one side into plates. Returns { plates, rest } in display units. */
+  function platesFor(total, bar, unit) {
+    let side = Math.round(((total - bar) / 2) * 1000) / 1000;
+    const plates = [];
+    for (const p of PLATES[unit]) {
+      while (side >= p - 1e-6) { plates.push(p); side = Math.round((side - p) * 1000) / 1000; }
+    }
+    return { plates, rest: side };
+  }
+
+  function platesHtml() {
+    const unit = Units.unit;
+    const bar = (state.settings.plateBar || {})[unit] || BARS[unit][0];
+    const parsed = entryKg(state.entry.weightText, state.entry.exactKg);
+    const total = parsed.kg == null ? null : Units.display(parsed.kg);
+    const fmt = (n) => String(Math.round(n * 100) / 100);
+    let body;
+    if (parsed.error) body = `<p class="sheet-body">${esc(parsed.error)}</p>`;
+    else if (total == null || total <= 0) body = '<p class="sheet-body">Type a weight above 0 to see the plates. Blank means bodyweight, and negative means assisted.</p>';
+    else if (total < bar - 1e-6) body = `<p class="sheet-body">${fmt(total)} ${unit} is lighter than a ${fmt(bar)} ${unit} bar.</p>`;
+    else {
+      const { plates, rest } = platesFor(total, bar, unit);
+      const exact = rest < 0.01;
+      const loaded = bar + 2 * plates.reduce((a, b) => a + b, 0);
+      // Side view of one half of the bar: sleeve with plates from the collar outward.
+      let x = 34;
+      const rects = plates.map((p) => {
+        const h = 92 * (PLATE_SIZE[p] || 0.4);
+        const w = p >= 10 ? 13 : 9;
+        const r = `<rect class="plate" x="${x}" y="${(60 - h / 2).toFixed(1)}" width="${w}" height="${h.toFixed(1)}" rx="1.5"/>
+          <text class="plate-label" x="${x + w / 2}" y="${(60 + h / 2 + 12).toFixed(1)}">${fmt(p)}</text>`;
+        x += Math.max(w + 3, 24);           // leave room for each label underneath
+        return r;
+      }).join('');
+      body = `
+        <svg class="plates-svg" viewBox="0 0 280 124" role="img" aria-label="One side of the bar: ${plates.length ? plates.map(fmt).join(', ') : 'no plates'}">
+          <rect class="bar-shaft" x="0" y="57" width="30" height="6"/>
+          <rect class="bar-collar" x="28" y="50" width="5" height="20"/>
+          <rect class="bar-sleeve" x="33" y="56" width="${Math.max(120, x - 20)}" height="8"/>
+          ${rects}
+        </svg>
+        <p class="plates-line"><b>Each side:</b> <span class="num">${plates.length ? plates.map(fmt).join(' + ') : 'nothing, just the bar'}</span></p>
+        <p class="plates-line muted num">${fmt(bar)} bar${plates.length ? ` + 2 × ${fmt((loaded - bar) / 2)}` : ''} = ${fmt(loaded)} ${unit}</p>
+        ${exact ? '' : `<p class="plates-line" style="color:var(--danger)">${fmt(total)} ${unit} can't be loaded exactly with standard plates. Closest below is ${fmt(loaded)} ${unit}.</p>`}`;
+    }
+    return `<h2 class="sheet-title">Plates${total > 0 ? ` for <span class="num">${fmt(total)} ${unit}</span>` : ''}</h2>
+      <div class="row" style="padding:4px 0 10px;border:0;min-height:0"><span class="row-label">Bar</span>
+        ${seg('plates-bar', String(bar), BARS[unit].map((b) => [String(b), `${b} ${unit}`]))}</div>
+      ${body}
+      <button class="btn btn-secondary btn-block" data-action="sheet-cancel" style="margin-top:14px">Close</button>`;
+  }
+
+  actions.plates = () => new Promise((resolve) => openSheet(platesHtml(), { resolve, label: 'Plate calculator' }));
+  actions['plates-bar'] = async (el) => {
+    const plateBar = { ...(state.settings.plateBar || {}), [Units.unit]: Number(el.dataset.value) };
+    state.settings = await Store.updateSettings({ plateBar });
+    const sheetEl = $('#sheet-root .sheet');
+    if (sheetEl) sheetEl.innerHTML = platesHtml();
+  };
+
   /* ---------- PR banner ---------- */
 
   let prTimer = null;
@@ -1097,12 +1200,28 @@
   }
   actions['pr-dismiss'] = () => { clearTimeout(prTimer); $('#pr-banner').innerHTML = ''; };
 
-  /* ---------- Rest timer ---------- */
+  /* ---------- Timers: rest countdown and stopwatch ---------- */
+  /*
+   * Where the timer lives is a setting (restTimer.placement):
+   *   'panel'  a row at the top of the set-entry block (the original layout)
+   *   'corner' a small hourglass in the bottom-right corner above the entry block
+   * Both open the same timer panel, which has two tabs: Rest and Stopwatch
+   * (the stopwatch is for timed holds such as planks; its time can go into the set note).
+   */
 
-  const timer = { running: false, done: false, startAt: 0, endAt: 0, total: 0, interval: null, wake: null, overlay: false };
+  const timer = { running: false, done: false, startAt: 0, endAt: 0, total: 0, interval: null, wake: null, overlay: false, tab: 'rest', nextSec: 0 };
+  const watch = { running: false, startAt: 0, acc: 0 };
 
-  /** Analog rest dial. Seconds hand sweeps once a minute; the arc shows rest left. */
-  function dialSvg(cls) {
+  const watchMs = () => watch.acc + (watch.running ? Date.now() - watch.startAt : 0);
+  const watchText = () => {
+    const ms = watchMs();
+    const sec = Math.floor(ms / 1000);
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
+  };
+  const watchShort = () => fmtDuration(Math.floor(watchMs() / 1000));
+
+  /** Analog dial. mode 'rest': the arc shows rest left. mode 'watch': the arc fills once a minute. */
+  function dialSvg(cls, mode = 'rest') {
     const parts = [];
     for (let i = 0; i < 60; i++) {
       const a = (i * 6 * Math.PI) / 180;
@@ -1116,28 +1235,47 @@
       const a = (n * 6 * Math.PI) / 180;
       parts.push(`<text class="numeral" x="${(100 + 68 * Math.sin(a)).toFixed(1)}" y="${(100 - 68 * Math.cos(a)).toFixed(1)}">${n}</text>`);
     }
-    return `<svg class="dial ${cls}" viewBox="0 0 200 200" aria-hidden="true" data-dial>
+    return `<svg class="dial ${cls}" viewBox="0 0 200 200" aria-hidden="true" data-dial="${mode}">
       <circle class="face" cx="100" cy="100" r="99"/>
       <circle class="track" cx="100" cy="100" r="94"/>
       <circle class="arc" cx="100" cy="100" r="94" pathLength="100" stroke-dasharray="100 100" transform="rotate(-90 100 100)" data-arc/>
       ${parts.join('')}
       <text class="readout" x="100" y="128" data-readout></text>
-      <text class="caption" x="100" y="152">rest left</text>
+      <text class="caption" x="100" y="152">${mode === 'watch' ? 'elapsed' : 'rest left'}</text>
       <g data-hand><line class="hand" x1="100" y1="114" x2="100" y2="16"/></g>
       <rect class="hub" x="95" y="95" width="10" height="10"/>
       <rect class="hub-in" x="98.5" y="98.5" width="3" height="3"/>
     </svg>`;
   }
 
+  /** Hourglass with sand in the theme colour; paintTimer() moves the sand. */
+  function hourglassSvg() {
+    return `<svg class="hourglass" viewBox="0 0 24 32" aria-hidden="true">
+      <defs>
+        <clipPath id="hg-top"><path d="M7 4h10v2c0 4.5-3 7.5-5 9.5C10 13.5 7 10.5 7 6z"/></clipPath>
+        <clipPath id="hg-bot"><path d="M12 16.5c2 2 5 5 5 9.5v2H7v-2c0-4.5 3-7.5 5-9.5z"/></clipPath>
+      </defs>
+      <rect class="sand" clip-path="url(#hg-top)" x="6" width="12" y="4" height="11.5" data-sand-top/>
+      <rect class="sand" clip-path="url(#hg-bot)" x="6" width="12" y="28" height="0" data-sand-bot/>
+      <line class="stream" x1="12" y1="15.5" x2="12" y2="27.5"/>
+      <path class="glass" d="M6 3h12v3c0 5-4 8-5.5 10C14 18 18 21 18 26v3H6v-3c0-5 4-8 5.5-10C10 14 6 11 6 6z"/>
+      <rect class="cap" x="3" y="1" width="18" height="2.2"/>
+      <rect class="cap" x="3" y="28.8" width="18" height="2.2"/>
+    </svg>`;
+  }
+
   const timerLeft = () => Math.max(0, timer.endAt - Date.now());
   const timerLeftText = () => fmtDuration(Math.ceil(timerLeft() / 1000));
+  const restSecs = () => timer.nextSec || state.settings.restTimer.durationSec;
+  const ICON_WATCH = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="11.5" r="6.5"/><path d="M10 11.5V8M8 2.5h4M15.5 5.5l1.2-1.2"/></svg>';
 
+  /** The row at the top of the entry block (placement 'panel'). */
   function restRowHtml() {
     const rt = state.settings.restTimer;
-    if (!rt.enabled) return '';
+    if (!rt.enabled || rt.placement === 'corner') return '';
     if (timer.running || timer.done) {
       return `<div class="rest-row${timer.done ? ' done' : ''}">
-        <button data-action="timer-open" aria-label="Show rest timer">${dialSvg('dial-mini')}</button>
+        <button data-action="timer-open" data-tab="rest" aria-label="Show rest timer">${dialSvg('dial-mini')}</button>
         <span class="label">${timer.done ? 'Rest over' : 'Resting'}<b data-timer-text>${timer.done ? '0:00' : timerLeftText()}</b></span>
         ${timer.done
           ? '<button class="btn btn-secondary btn-sm" data-action="timer-stop">Dismiss</button>'
@@ -1145,45 +1283,115 @@
              <button class="btn btn-secondary btn-sm" data-action="timer-stop">Skip</button>`}
       </div>`;
     }
+    if (watch.running || watch.acc) {
+      return `<div class="rest-row">
+        <button class="icon-btn" data-action="timer-open" data-tab="watch" aria-label="Show stopwatch">${ICON_WATCH}</button>
+        <span class="label">Stopwatch<b data-watch-text>${watchShort()}</b></span>
+        <button class="btn btn-secondary btn-sm" data-action="timer-open" data-tab="watch">Open</button>
+        ${watch.running ? '<button class="btn btn-secondary btn-sm" data-action="watch-stop">Stop</button>'
+          : '<button class="btn btn-secondary btn-sm" data-action="watch-reset">Clear</button>'}
+      </div>`;
+    }
     return `<div class="rest-row"><span class="label">Rest timer<b>${fmtDuration(rt.durationSec)}</b></span>
+      <button class="icon-btn" data-action="timer-open" data-tab="watch" aria-label="Stopwatch">${ICON_WATCH}</button>
       <button class="btn btn-secondary btn-sm" data-action="timer-start">Start rest</button></div>`;
+  }
+
+  /** The hourglass button (placement 'corner'), shown above the entry block. */
+  function cornerTimerHtml() {
+    const rt = state.settings.restTimer;
+    if (!rt.enabled || rt.placement !== 'corner') return '';
+    return `<button class="corner-timer${timer.done ? ' done' : ''}${timer.running || watch.running ? ' running' : ''}"
+      data-action="timer-open" data-tab="${watch.running && !timer.running ? 'watch' : 'rest'}" aria-label="Timer">
+      ${hourglassSvg()}<span class="t num" data-corner-text></span></button>`;
   }
 
   function paintTimer() {
     const left = timerLeft();
     const elapsed = (Date.now() - timer.startAt) / 1000;
-    const frac = timer.done ? 0 : Math.min(1, left / (timer.total * 1000));
+    const restFrac = timer.done ? 0 : timer.running ? Math.min(1, left / (timer.total * 1000)) : 1;
+    const wsec = watchMs() / 1000;
     $$('[data-dial]').forEach((svg) => {
+      const isWatch = svg.dataset.dial === 'watch';
+      const frac = isWatch ? (wsec % 60) / 60 : restFrac;
       svg.querySelector('[data-arc]').setAttribute('stroke-dasharray', `${(frac * 100).toFixed(2)} 100`);
-      const angle = timer.done ? 0 : (elapsed % 60) * 6;
+      const angle = isWatch ? (wsec % 60) * 6 : (timer.done || !timer.running ? 0 : (elapsed % 60) * 6);
       svg.querySelector('[data-hand]').setAttribute('transform', `rotate(${angle.toFixed(1)} 100 100)`);
-      svg.querySelector('[data-readout]').textContent = timer.done ? '0:00' : timerLeftText();
+      svg.querySelector('[data-readout]').textContent = isWatch ? watchText()
+        : timer.done ? '0:00' : timer.running ? timerLeftText() : fmtDuration(restSecs());
     });
     $$('[data-timer-text]').forEach((el) => { el.textContent = timer.done ? '0:00' : timerLeftText(); });
+    $$('[data-watch-text]').forEach((el) => { el.textContent = watchShort(); });
+    // Hourglass: rest drains the top bulb over the rest time; the stopwatch trickles once a minute.
+    const hg = $('.corner-timer');
+    if (hg) {
+      const usingWatch = !timer.running && !timer.done && (watch.running || watch.acc > 0);
+      const sandLeft = usingWatch ? 1 - (wsec % 60) / 60 : restFrac;
+      const topY = 4 + (1 - sandLeft) * 11.5;
+      hg.querySelector('[data-sand-top]').setAttribute('y', topY.toFixed(2));
+      hg.querySelector('[data-sand-top]').setAttribute('height', (15.5 - topY).toFixed(2));
+      const botH = (1 - sandLeft) * 11.5;
+      hg.querySelector('[data-sand-bot]').setAttribute('y', (28 - botH).toFixed(2));
+      hg.querySelector('[data-sand-bot]').setAttribute('height', botH.toFixed(2));
+      hg.querySelector('[data-corner-text]').textContent = timer.running ? timerLeftText()
+        : timer.done ? '0:00' : usingWatch ? watchShort() : '';
+    }
   }
 
   function refreshRestUi() {
     const slot = $('[data-rest-slot]');
     if (slot) slot.innerHTML = restRowHtml();
+    const corner = $('[data-corner-slot]');
+    if (corner) corner.innerHTML = cornerTimerHtml();
     renderOverlay();
     paintTimer();
   }
 
   function renderOverlay() {
     const ov = $('#timer-overlay');
-    if (!timer.overlay || (!timer.running && !timer.done)) { ov.hidden = true; ov.innerHTML = ''; return; }
+    if (!timer.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
+    const tab = timer.done ? 'rest' : timer.tab;
     ov.hidden = false;
-    ov.innerHTML = `<div class="timer-panel${timer.done ? ' done' : ''}" role="dialog" aria-label="Rest timer">
-      ${dialSvg('dial-big')}
-      <span class="title">${timer.done ? 'Rest over' : 'Resting'}</span>
-      ${timer.done
-        ? '<button class="btn btn-primary btn-block" data-action="timer-stop">Back to it</button>'
-        : `<div class="btns">
+    let body;
+    if (tab === 'rest') {
+      let controls;
+      if (timer.done) {
+        controls = '<button class="btn btn-primary btn-block" data-action="timer-stop">Back to it</button>';
+      } else if (timer.running) {
+        controls = `<div class="btns">
             <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
             <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
             <button class="btn btn-secondary" data-action="timer-stop">Skip</button>
-          </div>
-          <button class="text-btn" data-action="timer-hide">Hide</button>`}
+          </div>`;
+      } else {
+        controls = `<div class="btns">
+            <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
+            <button class="btn btn-primary" data-action="timer-start">Start</button>
+            <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
+          </div>`;
+      }
+      body = `${dialSvg('dial-big', 'rest')}
+        <span class="title">${timer.done ? 'Rest over' : timer.running ? 'Resting' : 'Rest'}</span>${controls}`;
+    } else {
+      const has = watch.running || watch.acc > 0;
+      const controls = watch.running
+        ? `<button class="btn btn-secondary" data-action="watch-reset">Reset</button>
+           <button class="btn btn-primary" data-action="watch-stop">Stop</button>
+           <button class="btn btn-secondary" disabled>To note</button>`
+        : `<button class="btn btn-secondary" data-action="watch-reset" ${has ? '' : 'disabled'}>Reset</button>
+           <button class="btn btn-primary" data-action="watch-start">${has ? 'Resume' : 'Start'}</button>
+           <button class="btn btn-secondary" data-action="watch-note" ${has && state.entry && state.activeSession ? '' : 'disabled'}>To note</button>`;
+      body = `${dialSvg('dial-big', 'watch')}
+        <span class="title">Stopwatch</span>
+        <div class="btns">${controls}</div>`;
+    }
+    ov.innerHTML = `<div class="timer-panel${timer.done ? ' done' : ''}" role="dialog" aria-label="Timer">
+      ${timer.done ? '' : `<div class="seg timer-tabs" role="group">
+        <button data-action="timer-tab" data-tab="rest" aria-pressed="${tab === 'rest'}">Rest</button>
+        <button data-action="timer-tab" data-tab="watch" aria-pressed="${tab === 'watch'}">Stopwatch</button>
+      </div>`}
+      ${body}
+      ${timer.done ? '' : '<button class="text-btn" data-action="timer-hide">Hide</button>'}
     </div>`;
   }
 
@@ -1191,13 +1399,16 @@
     try { if ('wakeLock' in navigator && !timer.wake) timer.wake = await navigator.wakeLock.request('screen'); } catch (_) { /* not allowed */ }
   }
   function wakeOff() {
-    if (timer.wake) { timer.wake.release().catch(() => {}); timer.wake = null; }
+    if (timer.wake && !timer.running && !watch.running) { timer.wake.release().catch(() => {}); timer.wake = null; }
+  }
+  function ensureTicking() {
+    clearInterval(timer.interval);
+    if (timer.running || watch.running) timer.interval = setInterval(timerTick, watch.running ? 100 : 200);
   }
 
   function timerStart(sec) {
-    Object.assign(timer, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + sec * 1000, total: sec });
-    clearInterval(timer.interval);
-    timer.interval = setInterval(timerTick, 200);
+    Object.assign(timer, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + sec * 1000, total: sec, nextSec: 0 });
+    ensureTicking();
     wakeOn();
     refreshRestUi();
   }
@@ -1206,7 +1417,7 @@
       timer.running = false;
       timer.done = true;
       timer.overlay = true;
-      clearInterval(timer.interval);
+      ensureTicking();
       if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
       setTimeout(wakeOff, 15000);
       refreshRestUi();
@@ -1215,22 +1426,56 @@
     paintTimer();
   }
   function timerStop() {
-    Object.assign(timer, { running: false, done: false, overlay: false });
-    clearInterval(timer.interval);
+    Object.assign(timer, { running: false, done: false, overlay: false, nextSec: 0 });
+    ensureTicking();
     wakeOff();
     refreshRestUi();
   }
 
-  actions['timer-start'] = () => timerStart(state.settings.restTimer.durationSec);
+  actions['timer-start'] = () => timerStart(restSecs());
   actions['timer-stop'] = () => timerStop();
-  actions['timer-open'] = () => { timer.overlay = true; renderOverlay(); paintTimer(); };
+  actions['timer-open'] = (el) => { timer.overlay = true; timer.tab = el.dataset.tab || 'rest'; renderOverlay(); paintTimer(); };
   actions['timer-hide'] = () => { timer.overlay = false; renderOverlay(); };
+  actions['timer-tab'] = (el) => { timer.tab = el.dataset.tab; renderOverlay(); paintTimer(); };
   actions['timer-add'] = (el) => {
-    if (!timer.running) return;
-    const d = Number(el.dataset.step) * 1000;
-    timer.endAt = Math.max(Date.now() + 1000, timer.endAt + d);
-    timer.total = Math.max(1, timer.total + d / 1000);
+    const d = Number(el.dataset.step);
+    if (!timer.running) {                       // before starting: adjust this rest only
+      timer.nextSec = Math.min(600, Math.max(15, restSecs() + d));
+      paintTimer();
+      return;
+    }
+    timer.endAt = Math.max(Date.now() + 1000, timer.endAt + d * 1000);
+    timer.total = Math.max(1, timer.total + d);
     paintTimer();
+  };
+  actions['watch-start'] = () => {
+    Object.assign(watch, { running: true, startAt: Date.now() });
+    ensureTicking();
+    wakeOn();
+    refreshRestUi();
+  };
+  actions['watch-stop'] = () => {
+    if (watch.running) Object.assign(watch, { running: false, acc: watch.acc + (Date.now() - watch.startAt) });
+    ensureTicking();
+    wakeOff();
+    refreshRestUi();
+  };
+  actions['watch-reset'] = () => {
+    Object.assign(watch, { running: false, startAt: 0, acc: 0 });
+    ensureTicking();
+    wakeOff();
+    refreshRestUi();
+  };
+  /** Puts the stopwatch time into the note of the set being entered, e.g. "Held 0:45". */
+  actions['watch-note'] = async () => {
+    if (!state.entry) return;
+    const text = `Held ${watchShort()}`;
+    state.entry.note = state.entry.note ? `${state.entry.note} · ${text}` : text;
+    state.entry.showNote = true;
+    timer.overlay = false;
+    renderOverlay();
+    await render({ keepScroll: true });
+    toast(`Added "${text}" to the note`);
   };
   $('#timer-overlay').addEventListener('click', (ev) => {
     if (ev.target.id !== 'timer-overlay') return;
@@ -1239,7 +1484,7 @@
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      if (timer.running) { wakeOn(); timerTick(); }
+      if (timer.running || watch.running) { wakeOn(); timerTick(); }
     }
   });
 
@@ -1650,6 +1895,49 @@
     </div>`;
   }
 
+
+  /** Bodyweight over time: the latest weigh-in, change over 30 days, a line chart and the list. */
+  async function renderBodyweightView() {
+    const all = await Store.listBodyweights();
+    const logBtn = `<div class="actions-bar"><button class="btn btn-secondary btn-block" data-action="bw-log" data-day="${todayKey()}">Log today's bodyweight</button></div>`;
+    if (!all.length) {
+      return `<div class="placeholder"><strong>No weigh-ins yet.</strong>
+        <span>Log your bodyweight here, on any day in the Calendar, or at the end of a workout.</span></div>${logBtn}`;
+    }
+    // One point per day: the last weigh-in of that day.
+    const byDay = new Map();
+    for (const b of all) byDay.set(b.date, b);
+    const days = [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+    const latest = days[days.length - 1];
+    const monthAgo = Store.util.dateKey(new Date(Date.now() - 30 * 864e5));
+    const base = days.filter((d) => d.date <= monthAgo).pop() || days[0];
+    const diff = Units.display(latest.kg) - Units.display(base.kg);
+    const diffText = base === latest ? 'First weigh-in'
+      : `${diff > 0 ? '+' : diff < 0 ? '−' : '±'}${Math.abs(Math.round(diff * 10) / 10)} ${Units.unit} since ${prettyDate(base.date)}`;
+    const points = days.map((d) => ({
+      x: dayNum(d.date),
+      y: Units.display(d.kg),
+      hollow: false,
+      detail: `<span><b class="num">${esc(weightPlain(d.kg))}</b> · ${esc(prettyDate(d.date))}<br>
+        <span class="muted">${d.sessionId ? 'After a workout' : 'Weigh-in'}</span></span>`,
+    }));
+    const list = all.slice().reverse().slice(0, state.prs.showAll ? undefined : 20);
+    return `<div class="pr-headline"><span class="big num">${esc(Units.format(latest.kg))}<small> ${Units.unit}</small></span>
+        <span class="sub">${esc(prettyDate(latest.date))} · ${esc(diffText)}</span></div>
+      ${days.length > 1 ? `<div class="chart-box has-detail">
+        <div class="chart-key"><span><i></i>Bodyweight (${Units.unit})</span></div>
+        ${chartSvg(points, { line: true })}
+      </div>
+      <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the weigh-in.</span></div>` : ''}
+      ${logBtn}
+      <section class="group ms-list" style="margin-top:4px"><h2 class="group-title">Weigh-ins, newest first</h2>
+        <div class="list">${list.map((b) => `<div class="row">
+          <span class="row-label">${esc(prettyDate(b.date))}<small>${b.sessionId ? 'After a workout' : 'Weigh-in'}</small></span>
+          <span class="num-r">${esc(weightPlain(b.kg))}</span></div>`).join('')}</div>
+        ${all.length > list.length ? '<div class="actions-bar"><button class="btn btn-secondary btn-block" data-action="ms-more">Show all</button></div>' : ''}
+      </section>`;
+  }
+
   async function renderPrs() {
     const p = state.prs;
     const milestones = await Store.listMilestones();
@@ -1665,7 +1953,7 @@
 
     const viewSelect = `<div class="field"><label for="pr-view">Show</label>
       <span class="select-wrap"><select class="select" id="pr-view" data-change="pr-view">
-        ${[['all', 'All milestones'], ['weight', 'Weight PRs'], ['reps', 'Rep PRs']].map(([v, l]) =>
+        ${[['all', 'All milestones'], ['weight', 'Weight PRs'], ['reps', 'Rep PRs'], ['bodyweight', 'Bodyweight']].map(([v, l]) =>
           `<option value="${v}"${p.view === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select></span></div>`;
     const exSelect = `<div class="field"><label for="pr-ex">Exercise</label>
@@ -1673,8 +1961,11 @@
         ${trained.map((e) => `<option value="${esc(e.id)}"${e.id === p.exerciseId ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}
       </select></span></div>`;
 
+    if (p.view === 'bodyweight') {
+      return `${head('PRs')}<div class="pr-controls">${viewSelect}</div>${await renderBodyweightView()}<div style="height:24px"></div>`;
+    }
     if (!trained.length) {
-      return `${head('PRs')}<div class="placeholder"><strong>No workouts yet.</strong>
+      return `${head('PRs')}<div class="pr-controls">${viewSelect}</div><div class="placeholder"><strong>No workouts yet.</strong>
         <span>Every exercise needs two sessions as a starting point. From the third session on, heavier sets and more reps at the same weight become milestones here.</span></div>`;
     }
 
@@ -1839,10 +2130,10 @@
     <section class="group">
       <h2 class="group-title">Workout screen</h2>
       <div class="list">
-        <div class="row"><span class="row-label">RPE slider<small>Rate each set from 6 to 10</small></span>
+        <div class="row"><span class="row-label">RPE slider<small>Starts empty for each set. Slide it to rate 6 to 10.</small></span>
           ${sw('toggle-rpe', s.rpeEnabled, 'RPE slider')}</div>
-        <div class="row"><span class="row-label">Rest timer</span>
-          ${sw('toggle-rest', rt.enabled, 'Rest timer')}</div>
+        <div class="row wrap"><span class="row-label">Timer<small>Rest countdown and stopwatch</small></span>
+          ${seg('set-rest-place', rt.enabled ? rt.placement : 'off', [['off', 'Off'], ['panel', 'In log'], ['corner', 'Corner']])}</div>
         ${rt.enabled ? `
         <div class="row sub"><span class="row-label">Start</span>
           ${seg('set-rest-start', rt.autoStart ? 'auto' : 'manual', [['manual', 'Manual'], ['auto', 'After each set']])}</div>
@@ -1933,7 +2224,11 @@
     return withThemeTransition(() => saveSettings({ accent: next }), { x: b.left + b.width / 2, y: b.top + b.height / 2 });
   };
   actions['toggle-rpe'] = () => saveSettings({ rpeEnabled: !state.settings.rpeEnabled });
-  actions['toggle-rest'] = () => saveSettings({ restTimer: { enabled: !state.settings.restTimer.enabled } });
+  actions['set-rest-place'] = (el) => {
+    const v = el.dataset.value;
+    if (v === 'off') timerStop();
+    return saveSettings({ restTimer: v === 'off' ? { enabled: false } : { enabled: true, placement: v } });
+  };
   actions['set-rest-start'] = (el) => saveSettings({ restTimer: { autoStart: el.dataset.value === 'auto' } });
   actions['rest-step'] = (el) => {
     const next = Math.min(600, Math.max(15, state.settings.restTimer.durationSec + Number(el.dataset.step)));

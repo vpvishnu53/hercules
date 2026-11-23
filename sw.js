@@ -2,11 +2,11 @@
  * sw.js: offline support.
  * The app files are served from the cache straight away (so the app opens
  * instantly with no signal) and refreshed in the background when online, so
- * an update shows up the next time the app is opened. Google Fonts files are
- * cached the first time they load. Workout data is not here: it lives in
+ * an update shows up the next time the app is opened. The fonts are bundled
+ * in fonts/ and cached with the app. Workout data is not here: it lives in
  * localStorage via storage.js.
  */
-const VERSION = 'v0.12';
+const VERSION = 'v0.13';
 const APP_CACHE = `wt-app-${VERSION}`;
 const FONT_CACHE = 'wt-fonts-v1';
 const APP_FILES = [
@@ -20,6 +20,10 @@ const APP_FILES = [
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './fonts/ibm-plex-sans-latin.woff2',
+  './fonts/ibm-plex-sans-condensed-500-latin.woff2',
+  './fonts/ibm-plex-sans-condensed-600-latin.woff2',
+  './fonts/ibm-plex-sans-condensed-700-latin.woff2',
 ];
 
 self.addEventListener('install', (event) => {

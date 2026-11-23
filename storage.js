@@ -146,8 +146,10 @@
       units: 'kg',            // 'kg' | 'lb'
       theme: 'system',        // 'system' | 'light' | 'dark'
       accent: 'green',        // colour option: green (default), blue, red, orange, yellow, graphite
+      plateBar: { kg: 20, lb: 45 },   // bar used by the plate calculator, per unit
       rpeEnabled: false,
-      restTimer: { enabled: false, autoStart: false, durationSec: 120 },
+      // placement: 'panel' (a row above the set entry) or 'corner' (an hourglass button)
+      restTimer: { enabled: false, autoStart: false, durationSec: 120, placement: 'panel' },
       // days: keyed by JS weekday (0 = Sunday) -> sessionTypeId or null
       schedule: { enabled: false, days: { 0: null, 1: null, 2: null, 3: null, 4: null, 5: null, 6: null } },
     };
@@ -308,6 +310,7 @@
         Object.assign(s, rest);
         if (restTimer) {
           Object.assign(s.restTimer, restTimer);
+          assert(['panel', 'corner'].includes(s.restTimer.placement), 'Unknown timer position.');
           const sec = s.restTimer.durationSec;
           assert(Number.isInteger(sec) && sec >= 5 && sec <= 3600, 'Rest time must be between 5 seconds and 60 minutes.');
         }
@@ -573,6 +576,23 @@
         if (p.rpe !== undefined && set.kind === 'main') { checkRpe(p.rpe); set.rpe = p.rpe; }
         if (p.note !== undefined) set.note = cleanName(p.note);
         return set;
+      });
+    },
+
+    /**
+     * Puts deleted sets back where they were (for Undo).
+     * entries: [{ set, index }] with the set exactly as it was and its old position.
+     */
+    restoreSets(sessionId, entries) {
+      return write((d) => {
+        const s = findSession(d, sessionId);
+        const sorted = entries.slice().sort((a, b) => a.index - b.index);
+        for (const { set, index } of sorted) {
+          assert(set && typeof set.id === 'string', 'Nothing to restore.');
+          if (s.sets.some((x) => x.id === set.id)) continue;
+          s.sets.splice(Math.min(index, s.sets.length), 0, clone(set));
+        }
+        return s;
       });
     },
 
