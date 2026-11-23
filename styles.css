@@ -756,6 +756,21 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .chart .pt.sel { r: 7px; }
 .chart-detail > * { animation: fade-in var(--dur) var(--ease); }
 
+/* ---------- Switching light / dark ---------- */
+/* The new theme spreads out in a circle from the button you tapped. */
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-new(root) { animation: theme-reveal 560ms var(--ease); }
+@keyframes theme-reveal {
+  from { clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 50%)); }
+  to { clip-path: circle(var(--vt-r, 150vmax) at var(--vt-x, 50%) var(--vt-y, 50%)); }
+}
+/* Fallback for browsers without View Transitions: colours fade across. */
+html.theme-fade, html.theme-fade *, html.theme-fade *::before, html.theme-fade *::after {
+  transition: background-color 400ms var(--ease), color 400ms var(--ease), border-color 400ms var(--ease),
+    fill 400ms var(--ease), stroke 400ms var(--ease) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

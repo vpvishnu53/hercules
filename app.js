@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.10';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.11';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -104,7 +104,38 @@
     const dark = pref === 'dark' || (pref === 'system' && darkQuery.matches);
     $('meta[name="theme-color"]').setAttribute('content', dark ? '#0E1411' : '#F3F5F3');
   }
-  darkQuery.addEventListener('change', applyTheme);
+  const isDark = (pref) => pref === 'dark' || (pref === 'system' && darkQuery.matches);
+
+  /**
+   * Runs `update` (which changes the theme) with a transition: the new theme
+   * spreads out in a circle from `origin` (the tapped button, or the screen
+   * centre). Browsers without View Transitions get a colour cross-fade instead.
+   */
+  async function withThemeTransition(update, origin) {
+    const root = document.documentElement;
+    if (reduceMotion.matches) return update();
+    if (!document.startViewTransition) {
+      root.classList.add('theme-fade');
+      await update();
+      setTimeout(() => root.classList.remove('theme-fade'), 450);
+      return undefined;
+    }
+    const x = origin ? origin.x : window.innerWidth / 2;
+    const y = origin ? origin.y : window.innerHeight / 2;
+    const r = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    root.style.setProperty('--vt-x', `${x}px`);
+    root.style.setProperty('--vt-y', `${y}px`);
+    root.style.setProperty('--vt-r', `${Math.ceil(r)}px`);
+    const vt = document.startViewTransition(() => update());
+    try { await vt.finished; } catch (_) { /* skipped */ }
+    return undefined;
+  }
+
+  darkQuery.addEventListener('change', () => {
+    // Only "Auto" follows the system, so only then is there anything to animate.
+    if (state.settings && state.settings.theme === 'system') withThemeTransition(applyTheme);
+    else applyTheme();
+  });
 
   /* ------------------------------------------------------------------ */
   /* Toast                                                               */
@@ -1864,7 +1895,13 @@
   }
 
   actions['set-units'] = (el) => saveSettings({ units: el.dataset.value });
-  actions['set-theme'] = (el) => saveSettings({ theme: el.dataset.value });
+  actions['set-theme'] = (el) => {
+    const next = el.dataset.value;
+    const change = () => saveSettings({ theme: next });
+    if (isDark(next) === isDark(state.settings.theme)) return change();   // looks the same: no animation
+    const b = el.getBoundingClientRect();
+    return withThemeTransition(change, { x: b.left + b.width / 2, y: b.top + b.height / 2 });
+  };
   actions['toggle-rpe'] = () => saveSettings({ rpeEnabled: !state.settings.rpeEnabled });
   actions['toggle-rest'] = () => saveSettings({ restTimer: { enabled: !state.settings.restTimer.enabled } });
   actions['set-rest-start'] = (el) => saveSettings({ restTimer: { autoStart: el.dataset.value === 'auto' } });
