@@ -653,6 +653,9 @@
       }));
     },
 
+    /** Problems that would stop `obj` from importing (empty array = fine). Does not change anything. */
+    checkImport(obj) { return Promise.resolve(validate(obj)); },
+
     /** Replaces everything with the file's data after checking it. Throws a StoreError listing problems. */
     importData(obj) {
       const problems = validate(obj);
