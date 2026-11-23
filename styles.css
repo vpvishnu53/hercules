@@ -515,6 +515,64 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .bw-form .w-input { height: 48px; }
 .bw-form .w-input input { font-size: 20px; }
 
+/* ---------- Calendar ---------- */
+.cal-nav { display: flex; align-items: center; gap: 4px; }
+.cal-nav .icon-btn { color: var(--fg); border: 1px solid var(--line-strong); }
+.cal-month { padding: 12px 16px 0; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.cal-month h2 { margin: 0; font-family: var(--f-num); font-size: 22px; font-weight: 700; }
+.cal-month span { color: var(--muted); font-size: 14px; }
+.cal { margin: 10px 16px 0; border-top: 1px solid var(--line); border-left: 1px solid var(--line); display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); background: var(--surface); }
+.cal .dow { padding: 6px 0; text-align: center; font-size: 12px; font-weight: 600; color: var(--muted); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); }
+.cal .day {
+  position: relative;
+  aspect-ratio: 1 / 1.05;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 5px 5px 6px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--f-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+}
+.cal .day.out { color: var(--muted); font-weight: 500; background: var(--bg); }
+.cal .day.trained { background: var(--sunk); }
+.cal .day.today .d { display: inline-grid; place-items: center; min-width: 24px; height: 22px; padding: 0 3px; margin: -2px 0 0 -3px; border: 1.5px solid var(--fg); border-radius: var(--r); }
+.cal .day[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent-text); }
+.cal .marks { display: flex; gap: 3px; align-items: center; min-height: 8px; }
+.cal .mark { width: 8px; height: 8px; border-radius: 1px; background: var(--accent); }
+.cal .mark.open { background: transparent; border: 1.5px solid var(--accent); }
+.cal .mark.bw { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 16px 0; font-size: 12px; color: var(--muted); }
+.cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.cal-legend .mark { display: inline-block; width: 8px; height: 8px; border-radius: 1px; background: var(--accent); }
+.cal-legend .mark.open { background: transparent; border: 1.5px solid var(--accent); }
+.cal-legend .mark.bw { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+
+.day-head { margin: 22px 16px 0; padding-top: 14px; border-top: 1px solid var(--line); display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.day-head h2 { margin: 0; font-family: var(--f-num); font-size: 20px; font-weight: 700; }
+.sess-card { margin: 12px 16px 0; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface); }
+.sess-card .sc-head { display: flex; align-items: center; gap: 10px; padding: 10px 6px 10px 12px; border-bottom: 1px solid var(--line); }
+.sess-card .sc-head .t { flex: 1; min-width: 0; }
+.sess-card .sc-head b { font-size: 16px; }
+.sess-card .sc-head small { display: block; color: var(--muted); font-size: 13px; }
+.sess-card .live { font-size: 12px; font-weight: 700; color: var(--accent-text); border: 1px solid var(--accent-text); border-radius: var(--r); padding: 1px 6px; margin-left: 6px; vertical-align: 2px; }
+.sc-ex { padding: 8px 0 6px; border-bottom: 1px solid var(--line); }
+.sc-ex:last-child { border-bottom: 0; }
+.sc-ex h3 { margin: 0 0 2px; padding: 0 12px; font-size: 14px; font-weight: 700; }
+.sc-ex .set-row { padding: 3px 12px; min-height: 30px; grid-template-columns: 24px 58px 12px 30px minmax(0, 1fr) auto; }
+.sc-ex .set-row .w, .sc-ex .set-row .r { font-size: 16px; }
+.sc-ex .set-row .n { width: 22px; height: 22px; }
+.sc-ex .drop-row { padding: 2px 12px; grid-template-columns: 24px 58px 12px 30px minmax(0, 1fr) auto; background: transparent; }
+.sc-ex .set-note { padding: 0 12px 2px 44px; }
+.bw-list .row { min-height: 48px; }
+.bw-list .num-r { font-family: var(--f-num); font-variant-numeric: tabular-nums; font-weight: 600; }
+
 /* ---------- Placeholder / empty screens ---------- */
 .placeholder { padding: 32px 16px; display: grid; gap: 8px; color: var(--muted); max-width: 46ch; }
 .placeholder strong { color: var(--fg); font-size: 16px; }

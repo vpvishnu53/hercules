@@ -151,6 +151,18 @@ group('Storage', (test) => {
     eq(await Store.getActiveSession(), null);
   });
 
+  test('reopening a finished workout to edit it keeps its date and end time', async () => {
+    await freshStore();
+    const s = await Store.startSession({ date: '2026-11-18' });
+    const done = await Store.finishSession(s.id, { finishedAt: '2026-11-18T19:10:00.000Z' });
+    await Store.reopenSession(s.id);
+    eq((await Store.getActiveSession()).id, s.id);
+    await Store.addSet(s.id, { exerciseId: 'ex_bench-press', weightKg: 80, reps: 8 });
+    const again = await Store.finishSession(s.id);
+    eq([again.date, again.finishedAt], ['2026-11-18', done.finishedAt]);
+    ok(!('reopenedFinishedAt' in again), 'temporary field removed');
+  });
+
   test('sets: bodyweight, assisted, validation, drop sets', async () => {
     await freshStore();
     const s = await Store.startSession();

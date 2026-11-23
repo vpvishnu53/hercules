@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.4';
+  const APP_VERSION = '0.5';
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -163,7 +163,7 @@
     state.route = parseRoute();
     if (prev.tab === 'settings' && prev.parts[0] === 'split' && state.route.parts[0] !== 'split') state.splitDraft = null;
     closeSheet();
-    render();
+    render({ keepScroll: prev.tab === 'calendar' && state.route.tab === 'calendar' });
   });
 
   /* ------------------------------------------------------------------ */
@@ -561,7 +561,7 @@
         </div>
         ${types.length ? '' : '<p class="group-note">Set up session types like Push or Legs in Settings to get exercise suggestions. Freestyle works without one.</p>'}
       </section>
-      ${last ? `<p class="last-row">Last workout: <b>${esc(sessionLabel(last))}</b> · ${esc(prettyDate(last.date))} · ${plural(mainSets(last).length, 'set')}</p>` : ''}
+      ${last ? `<p class="last-row">Last workout: <a href="#calendar/${last.date}"><b>${esc(sessionLabel(last))}</b> · ${esc(prettyDate(last.date))}</a> · ${plural(mainSets(last).length, 'set')}</p>` : ''}
       <div class="start-bar">
         <button class="btn btn-${todayType ? 'secondary' : 'primary'} btn-xl btn-block" data-action="start-go">
           Start ${esc(state.startPick ? typeName(state.startPick) : 'freestyle')} workout</button>
@@ -601,7 +601,9 @@
         <button class="finish" data-action="w-finish">Finish</button>
       </header>`;
 
-    const notice = session.date !== todayKey() ? `<div class="notice">
+    const notice = session.reopenedFinishedAt ? `<div class="notice">
+        <span>You are editing the workout from <b>${esc(prettyDate(session.date, true))}</b>. Tap Finish when you are done.</span>
+      </div>` : session.date !== todayKey() ? `<div class="notice">
         <span>This workout started on <b>${esc(prettyDate(session.date, true))}</b> and will be saved to that day.</span>
         <button class="text-btn" data-action="move-today">Move it to today instead</button>
       </div>` : '';
@@ -1152,10 +1154,190 @@
     toast('Bodyweight saved');
   };
 
+  /* ================================================================== */
+  /* Calendar tab                                                        */
+  /* Routes: #calendar (this month), #calendar/YYYY-MM, #calendar/YYYY-MM-DD */
+  /* ================================================================== */
+
   screens.calendar = {
-    async render() {
-      return `${head('Calendar')}<div class="placeholder"><strong>The calendar comes in stage 5.</strong></div>`;
+    async render(parts) {
+      const arg = parts[0] || '';
+      const today = todayKey();
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : (/^\d{4}-\d{2}$/.test(arg) ? null : today);
+      const month = (day || arg).slice(0, 7);
+      return renderCalendar(month, day);
     },
+  };
+
+  const monthKeyOf = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}`;   // m: 0-11
+  function shiftMonth(key, delta) {
+    const [y, m] = key.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return monthKeyOf(d.getFullYear(), d.getMonth());
+  }
+  const timeOf = (iso) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '');
+
+  async function renderCalendar(month, day) {
+    const [y, m] = month.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const lead = (first.getDay() + 6) % 7;                    // Monday-first grid
+    const start = new Date(y, m - 1, 1 - lead);
+    const weeks = Math.ceil((lead + new Date(y, m, 0).getDate()) / 7);
+    const today = todayKey();
+
+    const from = Store.util.dateKey(start);
+    const to = Store.util.dateKey(new Date(y, m - 1, 1 - lead + weeks * 7 - 1));
+    const sessions = await Store.listSessions({ from, to });
+    const bws = (await Store.listBodyweights()).filter((b) => b.date >= from && b.date <= to);
+    const byDay = {};
+    for (const s of sessions) (byDay[s.date] = byDay[s.date] || []).push(s);
+    const bwDays = new Set(bws.map((b) => b.date));
+
+    const inMonth = sessions.filter((s) => s.date.startsWith(month));
+    const monthSets = inMonth.reduce((n, s) => n + mainSets(s).length, 0);
+    const monthName = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const dowNames = [1, 2, 3, 4, 5, 6, 0].map((d) => new Date(2024, 0, d === 0 ? 7 : d).toLocaleDateString(undefined, { weekday: 'narrow' }));
+
+    let cells = '';
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = new Date(y, m - 1, 1 - lead + i);
+      const key = Store.util.dateKey(d);
+      const list = byDay[key] || [];
+      const out = d.getMonth() !== m - 1;
+      const marks = list.slice(0, 3).map((s) => `<span class="mark${s.finishedAt ? '' : ' open'}"></span>`).join('')
+        + (!list.length && bwDays.has(key) ? '<span class="mark bw"></span>' : '');
+      const label = `${d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${list.length ? `, ${plural(list.length, 'workout')}` : ''}`;
+      cells += `<button class="day${out ? ' out' : ''}${list.length ? ' trained' : ''}${key === today ? ' today' : ''}"
+        data-action="cal-day" data-day="${key}" aria-pressed="${key === day}" aria-label="${esc(label)}">
+        <span class="d">${d.getDate()}</span><span class="marks">${marks}</span></button>`;
+    }
+
+    const nav = `<div class="cal-nav">
+        <button class="icon-btn" data-action="cal-month" data-month="${shiftMonth(month, -1)}" aria-label="Previous month">${ICON.back}</button>
+        <button class="icon-btn" data-action="cal-month" data-month="${shiftMonth(month, 1)}" aria-label="Next month"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button>
+      </div>`;
+
+    return `<header class="screen-head"><h1>Calendar</h1>${nav}</header>
+      <div class="cal-month">
+        <h2>${esc(monthName)}</h2>
+        <span class="num">${inMonth.length ? `${plural(inMonth.length, 'workout')} · ${plural(monthSets, 'set')}` : 'No workouts'}</span>
+      </div>
+      <div class="cal" role="grid">
+        ${dowNames.map((n) => `<span class="dow" aria-hidden="true">${esc(n)}</span>`).join('')}
+        ${cells}
+      </div>
+      <div class="cal-legend">
+        <span><i class="mark"></i>Workout</span>
+        <span><i class="mark open"></i>In progress</span>
+        <span><i class="mark bw"></i>Weigh-in only</span>
+        ${month !== today.slice(0, 7) ? '<button class="text-btn" data-action="cal-today" style="min-height:24px;padding:0">Back to today</button>' : ''}
+      </div>
+      ${day ? await renderDay(day) : ''}
+      <div style="height:24px"></div>`;
+  }
+
+  async function renderDay(day) {
+    const sessions = await Store.listSessions({ from: day, to: day });
+    const bws = (await Store.listBodyweights()).filter((b) => b.date === day);
+    const ms = await Store.listMilestones();
+    const prBySet = {};
+    for (const mm of ms) (prBySet[mm.setId] = prBySet[mm.setId] || []).push(mm.type);
+
+    const card = (s) => {
+      const exIds = s.exerciseOrder.filter((x) => mainSets(s, x).length);
+      const prCount = ms.filter((mm) => mm.sessionId === s.id).length;
+      const time = s.finishedAt ? `${timeOf(s.startedAt)}–${timeOf(s.finishedAt)}` : `Started ${timeOf(s.startedAt)}`;
+      return `<article class="sess-card">
+        <div class="sc-head">
+          <span class="t"><b>${esc(sessionLabel(s))}</b>${s.finishedAt ? '' : '<span class="live">In progress</span>'}
+            <small class="num">${esc(time)} · ${plural(mainSets(s).length, 'set')}${prCount ? ` · ${plural(prCount, 'PR')}` : ''}</small></span>
+          <button class="row-menu" data-action="${s.finishedAt ? 'sess-menu' : 'sess-open'}" data-id="${esc(s.id)}" aria-label="Workout options">⋯</button>
+        </div>
+        ${exIds.length ? exIds.map((x) => `<div class="sc-ex">
+          <h3>${esc(exerciseName(x))}</h3>
+          ${mainSets(s, x).map((set, i) => `
+            <div class="set-row"><span class="n">${i + 1}</span><span class="w">${weightHtml(set.weightKg)}</span><span class="x">×</span>
+              <span class="r">${set.reps}</span><span class="rpe">${set.rpe != null ? `RPE ${set.rpe}` : ''}</span>
+              <span>${prBySet[set.id] ? `<span class="pr-badge">${TROPHY}PR</span>` : ''}</span></div>
+            ${set.note ? `<div class="set-note">${esc(set.note)}</div>` : ''}
+            ${dropsOf(s, set.id).map((d) => `<div class="drop-row"><span class="arrow">↳</span><span class="w">${weightHtml(d.weightKg)}</span>
+              <span class="x">×</span><span class="r">${d.reps}</span><span class="tag-d">drop</span><span></span></div>`).join('')}`).join('')}
+        </div>`).join('') : '<p class="empty">No sets logged yet.</p>'}
+      </article>`;
+    };
+
+    return `<div class="day-head"><h2>${esc(prettyDate(day, true))}</h2></div>
+      ${sessions.length ? sessions.map(card).join('') : `<p class="empty">${day > todayKey() ? 'Nothing here yet.' : 'Rest day.'}</p>`}
+      <section class="group" style="margin-top:16px">
+        <h2 class="group-title">Bodyweight</h2>
+        ${bws.length ? `<div class="list bw-list">${bws.map((b) => `<div class="row">
+            <span class="row-label">${b.sessionId ? 'After workout' : 'Weigh-in'}</span>
+            <span class="num-r">${esc(weightPlain(b.kg))}</span>
+            <button class="icon-btn" data-action="bw-delete" data-id="${esc(b.id)}" aria-label="Delete weigh-in">${ICON.x}</button>
+          </div>`).join('')}</div>` : ''}
+        ${day <= todayKey() ? `<div class="actions-bar" style="padding-top:${bws.length ? 12 : 0}px">
+          <button class="btn btn-secondary btn-block" data-action="bw-log" data-day="${day}">Log bodyweight</button></div>` : ''}
+      </section>`;
+  }
+
+  actions['cal-day'] = (el) => go(`#calendar/${el.dataset.day}`);
+  actions['cal-month'] = (el) => go(`#calendar/${el.dataset.month}`);
+  actions['cal-today'] = () => go('#calendar');
+  actions['sess-open'] = () => go('#log');
+
+  actions['sess-menu'] = async (el) => {
+    const s = await Store.getSession(el.dataset.id);
+    if (!s) return;
+    const choice = await choiceSheet({
+      title: `${sessionLabel(s)} · ${prettyDate(s.date)}`,
+      options: [['edit', 'Edit this workout'], ['delete', 'Delete workout', true]],
+    });
+    if (choice === 'edit') {
+      if (await Store.getActiveSession()) throw new Error('Finish your current workout first, then edit this one.');
+      await Store.reopenSession(s.id);
+      Object.assign(state, { entry: null, dropDraft: null });
+      go('#log');
+      toast(`Editing ${sessionLabel(s)}. Tap Finish when you are done.`);
+    }
+    if (choice === 'delete') {
+      const ok = await confirmSheet({
+        title: 'Delete this workout?',
+        body: `All ${plural(mainSets(s).length, 'set')} and any PRs from ${prettyDate(s.date, true)} will be deleted. This cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
+      await Store.deleteSession(s.id);
+      await recomputeMilestones(s.sets.map((x) => x.exerciseId));
+      await render({ keepScroll: true });
+      toast('Workout deleted');
+    }
+  };
+
+  actions['bw-log'] = async (el) => {
+    const day = el.dataset.day;
+    const bws = await Store.listBodyweights();
+    const latest = bws[bws.length - 1];
+    const saved = await formSheet({
+      title: `Bodyweight · ${prettyDate(day)}`,
+      submitLabel: 'Save',
+      fields: [{ name: 'kg', label: `Weight (${Units.unit})`, value: '', placeholder: latest ? inputText(latest.kg) : '', inputmode: 'decimal', num: true }],
+      onSubmit: (v) => {
+        const w = Units.parse(v.kg);
+        if (w.error || w.kg == null || w.kg <= 0) throw new Error('Enter your bodyweight as a number.');
+        return Store.logBodyweight({ date: day, kg: w.kg });
+      },
+    });
+    if (!saved) return;
+    await render({ keepScroll: true });
+    toast('Bodyweight saved');
+  };
+
+  actions['bw-delete'] = async (el) => {
+    const ok = await confirmSheet({ title: 'Delete this weigh-in?', confirmLabel: 'Delete', danger: true });
+    if (!ok) return;
+    await Store.deleteBodyweight(el.dataset.id);
+    await render({ keepScroll: true });
   };
   screens.prs = {
     async render() {

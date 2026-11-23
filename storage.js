@@ -492,7 +492,9 @@
     finishSession(id, { finishedAt } = {}) {
       return write((d) => {
         const s = findSession(d, id);
-        s.finishedAt = finishedAt || nowIso();
+        // A reopened (edited) workout keeps its original end time.
+        s.finishedAt = finishedAt || s.reopenedFinishedAt || nowIso();
+        delete s.reopenedFinishedAt;
         return s;
       });
     },
@@ -502,6 +504,7 @@
       return write((d) => {
         assert(!d.sessions.some((s) => !s.finishedAt && s.id !== id), 'Finish the current session first.');
         const s = findSession(d, id);
+        if (s.finishedAt) s.reopenedFinishedAt = s.finishedAt;
         s.finishedAt = null;
         return s;
       });
