@@ -573,6 +573,40 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .bw-list .row { min-height: 48px; }
 .bw-list .num-r { font-family: var(--f-num); font-variant-numeric: tabular-nums; font-weight: 600; }
 
+/* ---------- PRs tab ---------- */
+.pr-controls { padding: 14px 16px 0; display: grid; gap: 10px; }
+.pr-controls .two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px; }
+.pr-headline { padding: 14px 16px 0; display: grid; gap: 2px; }
+.pr-headline .big { font-family: var(--f-num); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 700; line-height: 1.1; }
+.pr-headline .big small { font-size: 15px; color: var(--muted); font-weight: 500; }
+.pr-headline .sub { color: var(--muted); font-size: 14px; }
+.chart-box { margin: 12px 16px 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); padding: 8px 4px 4px; }
+.chart-box svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-key { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 2px 8px 6px; font-size: 12px; color: var(--muted); }
+.chart-key span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-key i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--accent); }
+.chart-key i.hollow { background: var(--surface); box-shadow: inset 0 0 0 2px var(--accent); }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .base { stroke: var(--line-strong); stroke-width: 1; }
+.chart .tick-label { fill: var(--muted); font-family: var(--f-num); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .ln { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .pt { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.chart .pt.hollow { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.chart .pt.sel { stroke: var(--fg); stroke-width: 2.5; }
+.chart .hit { fill: transparent; cursor: pointer; }
+.chart .hit:focus-visible { outline: none; stroke: var(--accent-text); stroke-width: 2; }
+.chart-detail { margin: 0 16px; padding: 10px 12px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); background: var(--bg); font-size: 14px; min-height: 44px; display: flex; align-items: center; gap: 10px; }
+.chart-detail b { font-weight: 700; }
+.chart-detail .num { font-weight: 600; }
+.chart-detail .muted { font-size: 13px; }
+.chart-box + .chart-detail { margin-top: -1px; }
+.chart-box.has-detail { border-radius: var(--r) var(--r) 0 0; }
+.ms-list .row { min-height: 56px; align-items: center; }
+.ms-list .ms-icon { width: 18px; height: 18px; flex: none; color: var(--accent-text); }
+.ms-list .ms-icon.hollow { color: var(--muted); }
+.ms-list .num-r { font-family: var(--f-num); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; text-align: right; }
+.ms-list .num-r small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
+
 /* ---------- Placeholder / empty screens ---------- */
 .placeholder { padding: 32px 16px; display: grid; gap: 8px; color: var(--muted); max-width: 46ch; }
 .placeholder strong { color: var(--fg); font-size: 16px; }

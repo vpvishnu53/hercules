@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.5';
+  const APP_VERSION = '0.6';
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1339,11 +1339,281 @@
     await Store.deleteBodyweight(el.dataset.id);
     await render({ keepScroll: true });
   };
-  screens.prs = {
-    async render() {
-      return `${head('PRs')}<div class="placeholder"><strong>Milestones and charts come in stage 6.</strong></div>`;
-    },
+  /* ================================================================== */
+  /* PRs tab                                                             */
+  /*   All     scatter of every milestone (date × weight; filled = weight */
+  /*           PR, hollow = rep PR) and a dated list                     */
+  /*   Weight  pick an exercise: max weight per session + weight PRs     */
+  /*   Reps    pick an exercise, then a weight: reps over time + rep PRs */
+  /* ================================================================== */
+
+  state.prs = { view: 'all', exerciseId: null, weight: null, showAll: false };
+  state.chartPoints = [];
+
+  screens.prs = { render: renderPrs };
+
+  const dayNum = (key) => { const [y, m, d] = key.split('-').map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
+  const weightKey = (kg) => (kg == null ? 'bw' : String(Math.round(kg * 1000) / 1000));
+  const kgOfKey = (k) => (k === 'bw' ? null : Number(k));
+  const typedKg = (kg) => (kg == null ? 0 : kg);
+  const ICON_DOT = (hollow) => `<svg class="ms-icon${hollow ? ' hollow' : ''}" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="${hollow ? 'none' : 'currentColor'}" stroke="currentColor" stroke-width="2"/></svg>`;
+
+  function niceTicks(min, max, count = 4) {
+    if (min === max) { min -= 1; max += 1; }
+    const raw = (max - min) / count;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const r = raw / mag;
+    const step = (r >= 7.5 ? 10 : r >= 3.5 ? 5 : r >= 1.5 ? 2 : 1) * mag;
+    const lo = Math.floor(min / step) * step;
+    const hi = Math.ceil(max / step) * step;
+    const ticks = [];
+    for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v * 1000) / 1000);
+    return ticks;
+  }
+
+  function dateTicks(x0, x1) {
+    const span = x1 - x0;
+    const out = [];
+    if (span <= 62) {
+      const step = span <= 21 ? 7 : 14;
+      for (let x = x0; x <= x1; x += step) out.push(x);
+      return out.map((x) => [x, new Date(x * 864e5).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })]);
+    }
+    const d = new Date(x0 * 864e5);
+    let y = d.getUTCFullYear();
+    let m = d.getUTCMonth() + 1;
+    const months = [];
+    for (;;) {
+      if (m > 11) { m = 0; y++; }
+      const x = Date.UTC(y, m, 1) / 864e5;
+      if (x > x1) break;
+      months.push([x, y, m]);
+      m++;
+    }
+    const every = Math.max(1, Math.ceil(months.length / 5));
+    return months.filter((_, i) => i % every === 0).map(([x, yy, mm]) => [x,
+      new Date(Date.UTC(yy, mm, 1)).toLocaleDateString(undefined, { month: 'short', ...(mm === 0 ? { year: '2-digit' } : {}), timeZone: 'UTC' })]);
+  }
+
+  /**
+   * Inline SVG chart sized to the screen width.
+   * points: [{ x: dayNum, y, hollow, detail }]  (detail = HTML shown on tap)
+   * opts: { line, yFormat, yInteger }
+   */
+  function chartSvg(points, { line = false, yFormat = (v) => String(v), yInteger = false } = {}) {
+    const W = Math.max(280, Math.min(window.innerWidth, 560) - 42);
+    const H = 210;
+    const m = { l: 42, r: 12, t: 12, b: 26 };
+    const xs = points.map((p) => p.x);
+    let x0 = Math.min(...xs);
+    let x1 = Math.max(...xs);
+    if (x1 - x0 < 6) { x0 -= 3; x1 += 3; }
+    const pad = (x1 - x0) * 0.04;
+    x0 -= pad; x1 += pad;
+    const ysRaw = points.map((p) => p.y);
+    let yTicks = niceTicks(Math.min(...ysRaw), Math.max(...ysRaw));
+    if (yInteger) yTicks = [...new Set(yTicks.map(Math.round))];
+    const y0 = yTicks[0];
+    const y1 = yTicks[yTicks.length - 1];
+    const sx = (x) => m.l + ((x - x0) / (x1 - x0)) * (W - m.l - m.r);
+    const sy = (y) => H - m.b - ((y - y0) / (y1 - y0 || 1)) * (H - m.t - m.b);
+    const f = (n) => n.toFixed(1);
+
+    state.chartPoints = points.map((p) => p.detail);
+    const grid = yTicks.map((t) => `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${f(sy(t))}" y2="${f(sy(t))}"/>
+      <text class="tick-label" x="${m.l - 6}" y="${f(sy(t))}" text-anchor="end" dominant-baseline="central">${esc(String(yFormat(t)).replace(/^-/, '−'))}</text>`).join('');
+    const xt = dateTicks(Math.ceil(x0), Math.floor(x1)).map(([x, label]) =>
+      `<text class="tick-label" x="${f(sx(x))}" y="${H - 8}" text-anchor="middle">${esc(label)}</text>`).join('');
+    const path = line && points.length > 1
+      ? `<path class="ln" d="${points.map((p, i) => `${i ? 'L' : 'M'}${f(sx(p.x))} ${f(sy(p.y))}`).join(' ')}"/>` : '';
+    const dots = points.map((p, i) => `<circle class="pt${p.hollow ? ' hollow' : ''}" data-pt="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="${p.hollow ? 4.5 : 5}"/>`).join('');
+    const hits = points.map((p, i) => `<circle class="hit" tabindex="0" role="button" aria-label="Point ${i + 1} of ${points.length}" data-action="chart-point" data-i="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="13"/>`).join('');
+
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">
+      ${grid}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}"/>${xt}${path}${dots}${hits}</svg>`;
+  }
+
+  actions['chart-point'] = (el) => {
+    const i = Number(el.dataset.i);
+    $$('.chart .pt.sel').forEach((p) => p.classList.remove('sel'));
+    const dot = $(`.chart .pt[data-pt="${i}"]`);
+    if (dot) { dot.classList.add('sel'); dot.parentNode.insertBefore(dot, $('.chart .hit')); }
+    const box = $('#chart-detail');
+    if (box) box.innerHTML = state.chartPoints[i] || '';
   };
+  document.addEventListener('keydown', (ev) => {
+    if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches && ev.target.matches('.chart .hit')) {
+      ev.preventDefault();
+      actions['chart-point'](ev.target);
+    }
+  });
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (state.route.tab === 'prs') render({ keepScroll: true }); }, 200);
+  });
+
+  const msLabel = (m) => (m.type === 'weight' ? 'Weight PR' : 'Rep PR');
+  const msDetail = (m) => `${TROPHY.replace('<svg', '<svg style="width:18px;height:18px;flex:none;color:var(--accent-text)"')}
+    <span><b>${esc(exerciseName(m.exerciseId))}</b> · <span class="num">${esc(weightPlain(m.weightKg))} × ${m.reps}</span><br>
+    <span class="muted">${msLabel(m)} · ${esc(prettyDate(m.date))} · ${m.type === 'weight'
+      ? `was ${esc(weightPlain(m.previous.weightKg))}`
+      : `was ${plural(m.previous.reps, 'rep')}`}</span></span>`;
+
+  function msRow(m) {
+    return `<div class="row">${ICON_DOT(m.type === 'reps')}
+      <span class="row-label">${esc(exerciseName(m.exerciseId))}<small>${msLabel(m)} · ${esc(prettyDate(m.date))}</small></span>
+      <span class="num-r">${esc(weightPlain(m.weightKg))} × ${m.reps}
+        <small>${m.type === 'weight' ? `was ${esc(weightPlain(m.previous.weightKg))}` : `was ${plural(m.previous.reps, 'rep')}`}</small></span>
+    </div>`;
+  }
+
+  async function renderPrs() {
+    const p = state.prs;
+    const milestones = await Store.listMilestones();
+    const sessions = await Store.listSessions();
+    const trained = state.exercises.filter((e) => sessions.some((s) => mainSets(s, e.id).length))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (!p.exerciseId || !trained.some((e) => e.id === p.exerciseId)) {
+      const lastMs = milestones[milestones.length - 1];
+      p.exerciseId = lastMs ? lastMs.exerciseId : (trained[0] || {}).id || null;
+      p.weight = null;
+    }
+
+    const viewSelect = `<div class="field"><label for="pr-view">Show</label>
+      <span class="select-wrap"><select class="select" id="pr-view" data-change="pr-view">
+        ${[['all', 'All milestones'], ['weight', 'Weight PRs'], ['reps', 'Rep PRs']].map(([v, l]) =>
+          `<option value="${v}"${p.view === v ? ' selected' : ''}>${l}</option>`).join('')}
+      </select></span></div>`;
+    const exSelect = `<div class="field"><label for="pr-ex">Exercise</label>
+      <span class="select-wrap"><select class="select" id="pr-ex" data-change="pr-ex">
+        ${trained.map((e) => `<option value="${esc(e.id)}"${e.id === p.exerciseId ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}
+      </select></span></div>`;
+
+    if (!trained.length) {
+      return `${head('PRs')}<div class="placeholder"><strong>No workouts yet.</strong>
+        <span>Every exercise needs two sessions as a starting point. From the third session on, heavier sets and more reps at the same weight become milestones here.</span></div>`;
+    }
+
+    // Controls first: the weight picker settles the default weight the Reps chart uses.
+    const controls = p.view === 'reps'
+      ? `${viewSelect}<div class="two">${exSelect}${repWeightSelect(sessions)}</div>`
+      : p.view === 'weight' ? `${viewSelect}${exSelect}` : viewSelect;
+
+    let body = '';
+    if (p.view === 'all') body = renderAllMilestones(milestones);
+    else if (p.view === 'weight') body = renderWeightView(sessions, milestones);
+    else body = renderRepsView(sessions, milestones);
+
+    return `${head('PRs')}<div class="pr-controls">${controls}</div>${body}<div style="height:24px"></div>`;
+  }
+
+  function renderAllMilestones(milestones) {
+    if (!milestones.length) {
+      return `<div class="placeholder"><strong>No milestones yet.</strong>
+        <span>Each exercise needs two sessions as a starting point. From the third session on, a heavier set or more reps at the same weight is a milestone.</span></div>`;
+    }
+    const nW = milestones.filter((m) => m.type === 'weight').length;
+    const points = milestones.map((m) => ({
+      x: dayNum(m.date),
+      y: Units.display(typedKg(m.weightKg)),
+      hollow: m.type === 'reps',
+      detail: msDetail(m),
+    }));
+    const list = milestones.slice().reverse();
+    const shown = state.prs.showAll ? list : list.slice(0, 20);
+    return `<div class="pr-headline"><span class="big num">${milestones.length}<small> milestones</small></span>
+        <span class="sub">${plural(nW, 'weight PR')} · ${plural(milestones.length - nW, 'rep PR')} across ${plural(new Set(milestones.map((m) => m.exerciseId)).size, 'exercise')}</span></div>
+      <div class="chart-box has-detail">
+        <div class="chart-key"><span><i></i>Weight PR</span><span><i class="hollow"></i>Rep PR</span><span>Up: weight (${Units.unit})</span></div>
+        ${chartSvg(points, { yFormat: (v) => (v === 0 ? 'BW' : String(v)) })}
+      </div>
+      <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the lift.</span></div>
+      <section class="group ms-list"><h2 class="group-title">Newest first</h2>
+        <div class="list">${shown.map(msRow).join('')}</div>
+        ${list.length > shown.length ? `<div class="actions-bar"><button class="btn btn-secondary btn-block" data-action="ms-more">Show all ${list.length}</button></div>` : ''}
+      </section>`;
+  }
+
+  function renderWeightView(sessions, milestones) {
+    const exId = state.prs.exerciseId;
+    const series = PRs.maxWeightSeries(sessions, exId);
+    const prSessions = new Set(milestones.filter((m) => m.exerciseId === exId && m.type === 'weight').map((m) => m.sessionId));
+    const ms = milestones.filter((m) => m.exerciseId === exId && m.type === 'weight').reverse();
+    let best = series[0];
+    for (const s of series) if (typedKg(s.weightKg) > typedKg(best.weightKg) + PRs.TOLERANCE_KG) best = s;
+    const hasBw = series.some((s) => s.weightKg == null);
+    const points = series.map((s) => ({
+      x: dayNum(s.date),
+      y: Units.display(typedKg(s.weightKg)),
+      hollow: !prSessions.has(s.sessionId),
+      detail: `<span><b class="num">${esc(weightPlain(s.weightKg))} × ${s.reps}</b> · ${esc(prettyDate(s.date))}<br>
+        <span class="muted">${prSessions.has(s.sessionId) ? 'Weight PR this session' : 'Heaviest set this session'}</span></span>`,
+    }));
+    return `<div class="pr-headline"><span class="big num">${esc(Units.format(best.weightKg))}<small> ${best.weightKg == null ? '' : Units.unit} × ${best.reps}</small></span>
+        <span class="sub">Heaviest so far · ${esc(prettyDate(best.date))} · ${plural(series.length, 'session')}</span></div>
+      <div class="chart-box has-detail">
+        <div class="chart-key"><span><i></i>Weight PR</span><span><i class="hollow"></i>Heaviest set of a session</span></div>
+        ${chartSvg(points, { line: true, yFormat: (v) => (v === 0 && hasBw ? 'BW' : String(v)) })}
+      </div>
+      <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the session.</span></div>
+      <section class="group ms-list"><h2 class="group-title">Weight PRs, newest first</h2>
+        ${ms.length ? `<div class="list">${ms.map(msRow).join('')}</div>`
+          : `<p class="empty">${series.length < 3 ? `PRs count from the 3rd session. ${plural(series.length, 'session')} logged so far.` : 'No weight PRs yet.'}</p>`}
+      </section>`;
+  }
+
+  function repWeights(sessions) {
+    return PRs.weightsUsed(sessions, state.prs.exerciseId);
+  }
+
+  function repWeightSelect(sessions) {
+    const list = repWeights(sessions);
+    if (!list.some((w) => weightKey(w.weightKg) === state.prs.weight)) {
+      // Default: the weight used most often.
+      const top = list.slice().sort((a, b) => b.sets - a.sets)[0];
+      state.prs.weight = top ? weightKey(top.weightKg) : null;
+    }
+    return `<div class="field"><label for="pr-w">Weight</label>
+      <span class="select-wrap"><select class="select num" id="pr-w" data-change="pr-w">
+        ${list.map((w) => `<option value="${weightKey(w.weightKg)}"${weightKey(w.weightKg) === state.prs.weight ? ' selected' : ''}>${esc(weightPlain(w.weightKg))} · ${plural(w.sets, 'set')}</option>`).join('')}
+      </select></span></div>`;
+  }
+
+  function renderRepsView(sessions, milestones) {
+    const exId = state.prs.exerciseId;
+    const kg = kgOfKey(state.prs.weight);
+    const series = PRs.repsAtWeightSeries(sessions, exId, kg);
+    const near = (a) => Math.abs(typedKg(a) - typedKg(kg)) <= PRs.TOLERANCE_KG;
+    const ms = milestones.filter((m) => m.exerciseId === exId && m.type === 'reps' && near(m.weightKg)).reverse();
+    const prSessions = new Set(ms.map((m) => m.sessionId));
+    if (!series.length) return '<p class="empty">No sets at this weight yet.</p>';
+    let best = series[0];
+    for (const s of series) if (s.reps > best.reps) best = s;
+    const points = series.map((s) => ({
+      x: dayNum(s.date),
+      y: s.reps,
+      hollow: !prSessions.has(s.sessionId),
+      detail: `<span><b class="num">${plural(s.reps, 'rep')}</b> at ${esc(weightPlain(kg))} · ${esc(prettyDate(s.date))}<br>
+        <span class="muted">${prSessions.has(s.sessionId) ? 'Rep PR this session' : 'Most reps this session'}</span></span>`,
+    }));
+    return `<div class="pr-headline"><span class="big num">${best.reps}<small> reps at ${esc(weightPlain(kg))}</small></span>
+        <span class="sub">Most so far · ${esc(prettyDate(best.date))} · ${plural(series.length, 'session')} at this weight</span></div>
+      <div class="chart-box has-detail">
+        <div class="chart-key"><span><i></i>Rep PR</span><span><i class="hollow"></i>Most reps in a session</span></div>
+        ${chartSvg(points, { line: true, yInteger: true })}
+      </div>
+      <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the session.</span></div>
+      <section class="group ms-list"><h2 class="group-title">Rep PRs at ${esc(weightPlain(kg))}, newest first</h2>
+        ${ms.length ? `<div class="list">${ms.map(msRow).join('')}</div>` : '<p class="empty">No rep PRs at this weight yet.</p>'}
+      </section>`;
+  }
+
+  changes['pr-view'] = (el) => { state.prs.view = el.value; state.prs.showAll = false; return render({ keepScroll: true }); };
+  changes['pr-ex'] = (el) => { state.prs.exerciseId = el.value; state.prs.weight = null; return render({ keepScroll: true }); };
+  changes['pr-w'] = (el) => { state.prs.weight = el.value; return render({ keepScroll: true }); };
+  actions['ms-more'] = () => { state.prs.showAll = true; return render({ keepScroll: true }); };
 
   /* ---------- Settings ---------- */
 
