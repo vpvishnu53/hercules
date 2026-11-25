@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.21.1';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.21.2';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1368,17 +1368,20 @@
 
   const PLATES = { kg: [25, 20, 15, 10, 5, 2.5, 1.25], lb: [45, 35, 25, 10, 5, 2.5] };
   const BARS = { kg: [20, 15, 10], lb: [45, 35, 25] };
-  // Competition-style colours, one per plate. `ink` is the label colour on it.
+  // Competition (calibrated) plates: colour, diameter and thickness in mm.
+  // The drawing uses these real sizes, so the bar is drawn to scale.
   const PLATE_LOOK = {
-    kg: { 25: ['#D0342C', 1, 18], 20: ['#2F5FBF', 0.94, 16], 15: ['#E8BC1E', 0.86, 14], 10: ['#2E8A50', 0.76, 12],
-      5: ['#F4F4F2', 0.6, 10], 2.5: ['#26292B', 0.5, 9], 1.25: ['#B9C0C8', 0.42, 8] },
-    lb: { 45: ['#2F5FBF', 1, 18], 35: ['#E8BC1E', 0.9, 15], 25: ['#2E8A50', 0.8, 13], 10: ['#F4F4F2', 0.64, 11],
-      5: ['#26292B', 0.52, 9], 2.5: ['#B9C0C8', 0.44, 8] },
+    kg: { 25: ['#D0342C', 450, 27], 20: ['#2F5FBF', 450, 23], 15: ['#E8BC1E', 400, 21], 10: ['#2E8A50', 325, 18],
+      5: ['#F4F4F2', 230, 16], 2.5: ['#26292B', 190, 13], 1.25: ['#B9C0C8', 160, 11] },
+    lb: { 45: ['#2F5FBF', 450, 24], 35: ['#E8BC1E', 400, 21], 25: ['#2E8A50', 325, 18], 10: ['#F4F4F2', 230, 16],
+      5: ['#26292B', 190, 13], 2.5: ['#B9C0C8', 160, 11] },
   };
+  // Olympic bar, mm: 415 loadable sleeve, 50 sleeve, 28 shaft, collar flange 30 thick.
+  const BAR_MM = { sleeve: 415, sleeveDia: 50, shaftDia: 28, collar: 30, collarDia: 78, shaft: 70 };
   const DARK_INK = new Set(['#E8BC1E', '#F4F4F2', '#B9C0C8']);
   const plateLook = (unit, p) => {
-    const [fill, size, width] = PLATE_LOOK[unit][p];
-    return { fill, size, width, ink: DARK_INK.has(fill) ? '#141414' : '#FFFFFF' };
+    const [fill, dia, thick] = PLATE_LOOK[unit][p];
+    return { fill, dia, thick, ink: DARK_INK.has(fill) ? '#141414' : '#FFFFFF' };
   };
   // Plates on one side, per unit. Kept while the app is open so you can add as you load.
   const plateLoad = { kg: [], lb: [] };
@@ -1392,20 +1395,24 @@
     const perSide = side.reduce((a, b) => a + b, 0);
     const total = bar + 2 * perSide;
 
-    // Side view of one half of the bar, plates packed against the collar.
-    let x = 34;
+    // Side view of one half of the bar in mm, plates packed against the collar.
+    // The sleeve is its real 415 mm; only when the plates overflow it does it grow.
+    const B = BAR_MM;
+    const cy = 240;
+    const sleeveX = B.shaft + B.collar;
+    let x = sleeveX;
     const rects = side.map((p) => {
-      const { fill, size, width, ink } = plateLook(unit, p);
-      const h = 104 * size;
-      const y = 64 - h / 2;
-      const cx = x + width / 2;
+      const { fill, dia, thick, ink } = plateLook(unit, p);
+      const cx = x + thick / 2;
+      const label = thick >= 15
+        ? `<text x="${cx}" y="${cy}" fill="${ink}" transform="rotate(-90 ${cx} ${cy})">${fmt(p)}</text>` : '';
       const g = `<g class="plate" data-action="plate-off" data-plate="${p}" role="button" aria-label="Take off ${fmt(p)}">
-          <rect x="${x + 0.5}" y="${y.toFixed(1)}" width="${width - 1}" height="${h.toFixed(1)}" rx="1" fill="${fill}"/>
-          <text x="${cx}" y="64" fill="${ink}" transform="rotate(-90 ${cx} 64)">${fmt(p)}</text></g>`;
-      x += width;
+          <rect x="${x}" y="${cy - dia / 2}" width="${thick}" height="${dia}" rx="2" fill="${fill}"/>${label}</g>`;
+      x += thick;
       return g;
     }).join('');
-    const vbW = Math.max(280, x + 16);
+    const sleeveLen = Math.max(B.sleeve, x - sleeveX + 6);
+    const vbW = sleeveX + sleeveLen + 4;
 
     const chips = PLATES[unit].map((p) => {
       const { fill, ink } = plateLook(unit, p);
@@ -1417,10 +1424,10 @@
     return `<h2 class="sheet-title">Plates</h2>
       <div class="row" style="padding:4px 0 10px;border:0;min-height:0"><span class="row-label">Bar</span>
         ${seg('plates-bar', String(bar), BARS[unit].map((b) => [String(b), `${b} ${unit}`]))}</div>
-      <svg class="plates-svg" viewBox="0 0 ${vbW} 128" data-action="plate-pop" role="button" aria-label="One side of the bar. Tap to take off the outermost plate">
-        <rect class="bar-shaft" x="0" y="61" width="30" height="6"/>
-        <rect class="bar-collar" x="28" y="52" width="6" height="24"/>
-        <rect class="bar-sleeve" x="34" y="60" width="${vbW - 34}" height="8"/>
+      <svg class="plates-svg" viewBox="0 0 ${vbW} 480" data-action="plate-pop" role="button" aria-label="One side of the bar. Tap to take off the outermost plate">
+        <rect class="bar-shaft" x="0" y="${cy - B.shaftDia / 2}" width="${B.shaft}" height="${B.shaftDia}"/>
+        <rect class="bar-sleeve" x="${sleeveX}" y="${cy - B.sleeveDia / 2}" width="${sleeveLen}" height="${B.sleeveDia}" rx="3"/>
+        <rect class="bar-collar" x="${B.shaft}" y="${cy - B.collarDia / 2}" width="${B.collar}" height="${B.collarDia}" rx="3"/>
         ${rects}
       </svg>
       <div class="plates-total"><span class="num big">${fmt(total)} <small>${unit}</small></span>
