@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.21.2';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.21.3';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1368,13 +1368,14 @@
 
   const PLATES = { kg: [25, 20, 15, 10, 5, 2.5, 1.25], lb: [45, 35, 25, 10, 5, 2.5] };
   const BARS = { kg: [20, 15, 10], lb: [45, 35, 25] };
-  // Competition (calibrated) plates: colour, diameter and thickness in mm.
-  // The drawing uses these real sizes, so the bar is drawn to scale.
+  // Bumper plates: colour, diameter and thickness in mm. All share the 450 mm
+  // diameter and only the thickness changes, so every plate is easy to tap.
+  // The drawing uses these sizes, so the bar is drawn to scale.
   const PLATE_LOOK = {
-    kg: { 25: ['#D0342C', 450, 27], 20: ['#2F5FBF', 450, 23], 15: ['#E8BC1E', 400, 21], 10: ['#2E8A50', 325, 18],
-      5: ['#F4F4F2', 230, 16], 2.5: ['#26292B', 190, 13], 1.25: ['#B9C0C8', 160, 11] },
-    lb: { 45: ['#2F5FBF', 450, 24], 35: ['#E8BC1E', 400, 21], 25: ['#2E8A50', 325, 18], 10: ['#F4F4F2', 230, 16],
-      5: ['#26292B', 190, 13], 2.5: ['#B9C0C8', 160, 11] },
+    kg: { 25: ['#D0342C', 450, 70], 20: ['#2F5FBF', 450, 58], 15: ['#E8BC1E', 450, 46], 10: ['#2E8A50', 450, 34],
+      5: ['#F4F4F2', 450, 26], 2.5: ['#26292B', 450, 20], 1.25: ['#B9C0C8', 450, 16] },
+    lb: { 45: ['#2F5FBF', 450, 62], 35: ['#E8BC1E', 450, 50], 25: ['#2E8A50', 450, 40], 10: ['#F4F4F2', 450, 28],
+      5: ['#26292B', 450, 22], 2.5: ['#B9C0C8', 450, 16] },
   };
   // Olympic bar, mm: 415 loadable sleeve, 50 sleeve, 28 shaft, collar flange 30 thick.
   const BAR_MM = { sleeve: 415, sleeveDia: 50, shaftDia: 28, collar: 30, collarDia: 78, shaft: 70 };
@@ -1404,8 +1405,9 @@
     const rects = side.map((p) => {
       const { fill, dia, thick, ink } = plateLook(unit, p);
       const cx = x + thick / 2;
-      const label = thick >= 15
-        ? `<text x="${cx}" y="${cy}" fill="${ink}" transform="rotate(-90 ${cx} ${cy})">${fmt(p)}</text>` : '';
+      // The label shrinks to fit thin plates; the thinnest goes without.
+      const label = thick >= 20
+        ? `<text x="${cx}" y="${cy}" fill="${ink}" font-size="${Math.min(24, thick - 4)}" transform="rotate(-90 ${cx} ${cy})">${fmt(p)}</text>` : '';
       const g = `<g class="plate" data-action="plate-off" data-plate="${p}" role="button" aria-label="Take off ${fmt(p)}">
           <rect x="${x}" y="${cy - dia / 2}" width="${thick}" height="${dia}" rx="2" fill="${fill}"/>${label}</g>`;
       x += thick;
