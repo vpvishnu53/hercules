@@ -944,7 +944,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 /* Corner clock: stopwatch and timer side by side, swipe or tap to switch. */
 .gp-panel { overflow: hidden; }
 .clock-view { justify-self: stretch; overflow: hidden; touch-action: pan-y; }
-.clock-strip { display: flex; width: 200%; }
+.clock-strip { display: flex; width: 200%; align-items: flex-start; }
 .clock-page { flex: 0 0 50%; min-width: 0; display: grid; justify-items: center; align-content: start; gap: 14px; padding: 0 2px; }
 .clock-page .btns { width: 100%; }
 .time-set { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }

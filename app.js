@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.20.3';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.20.4';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1475,7 +1475,8 @@
       const a = (n * 6 * Math.PI) / 180;
       parts.push(`<text class="numeral" x="${(100 + 68 * Math.sin(a)).toFixed(1)}" y="${(100 - 68 * Math.cos(a)).toFixed(1)}">${n}</text>`);
     }
-    const caption = { rest: 'rest left', down: 'left to hold', up: 'elapsed', 'gp-up': 'elapsed', 'gp-down': 'left' }[mode];
+    // The corner stopwatch has no caption: its tab already says what it is.
+    const caption = { rest: 'rest left', down: 'left to hold', up: 'elapsed', 'gp-up': '', 'gp-down': 'left' }[mode];
     return `<svg class="dial ${cls}" viewBox="0 0 200 200" aria-hidden="true" data-dial="${mode}">
       <circle class="face" cx="100" cy="100" r="99"/>
       <circle class="track" cx="100" cy="100" r="94"/>
@@ -1584,7 +1585,6 @@
            <button class="btn btn-primary" data-action="sw-start">${sw.acc ? 'Resume' : 'Start'}</button>`;
       return `<div class="clock-page" data-page="up">
         ${dialSvg('dial-big', 'gp-up')}
-        <span class="title">Stopwatch</span>
         <div class="btns two">${controls}</div>
       </div>`;
     }
@@ -1611,7 +1611,7 @@
     }
     return `<div class="clock-page${cd.done ? ' done' : ''}" data-page="down">
       ${dialSvg('dial-big', 'gp-down')}
-      <span class="title">${cd.done ? "Time's up" : cd.running ? 'Timer' : 'Set a time'}</span>
+      ${cd.running ? '' : `<span class="title">${cd.done ? "Time's up" : 'Set a time'}</span>`}
       ${controls}
     </div>`;
   }
@@ -1631,6 +1631,16 @@
       <div class="clock-view"><div class="clock-strip" style="transform:translateX(${-idx * 50}%)">${gpPageHtml('up')}${gpPageHtml('down')}</div></div>
       <button class="text-btn" data-action="gp-hide">${gp.running || gp.cd.done ? 'Hide' : 'Close'}</button>
     </div>`;
+    fitClockView(false);
+  }
+
+  /** The panel is as tall as the page showing, so Close sits right under its buttons. */
+  function fitClockView(animate) {
+    const view = $('#gp-overlay .clock-view');
+    const page = $(`#gp-overlay .clock-page[data-page="${gp.view === 'down' ? 'down' : 'up'}"]`);
+    if (!view || !page) return;
+    view.style.transition = animate && !reduceMotion.matches ? 'height 260ms var(--glide)' : 'none';
+    view.style.height = `${page.offsetHeight}px`;
   }
 
   /** Slides the panel to the stopwatch or the timer without redrawing it. */
@@ -1642,6 +1652,7 @@
       strip.style.transform = `translateX(${mode === 'down' ? -50 : 0}%)`;
     }
     $$('#gp-overlay .timer-tabs button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    fitClockView(animate);
   }
 
   function gpTick() {
