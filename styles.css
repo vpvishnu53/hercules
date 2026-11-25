@@ -199,13 +199,23 @@ body.kb-open .sheet { max-height: calc(var(--vvh, 100dvh) - 16px); }
   #app { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 }
 #view {
-  outline: none;
   flex: 1 1 auto;
   min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+/* The four tab pages side by side; swiping moves this strip. */
+#track { display: flex; height: 100%; will-change: transform; transform: translate3d(0, 0, 0); }
+.pane {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  outline: none;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior-y: contain;       /* no accidental pull-to-refresh mid-workout */
   -webkit-overflow-scrolling: touch;
+  background: var(--bg);
 }
 
 /* ---------- Bottom tab bar ---------- */
@@ -953,11 +963,8 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 
 /* ---------- Moving between the four tabs ---------- */
 #app { overflow-x: clip; }                 /* a page mid-swipe never scrolls the screen sideways */
-#view { will-change: auto; }
-#view.enter-next { animation: from-right 130ms var(--snap) both; }
-#view.enter-prev { animation: from-left 130ms var(--snap) both; }
-#view.swipe-next { animation: from-right-full 130ms var(--snap) both; }
-#view.swipe-prev { animation: from-left-full 130ms var(--snap) both; }
+/* Page glide after a swipe or tab tap: quick start, gentle stop, like phone home screens. */
+:root { --glide: cubic-bezier(0.22, 0.8, 0.28, 1); }
 @keyframes from-right { from { opacity: 0; transform: translateX(18%); } to { opacity: 1; transform: none; } }
 @keyframes from-left { from { opacity: 0; transform: translateX(-18%); } to { opacity: 1; transform: none; } }
 @keyframes from-right-full { from { opacity: 0.4; transform: translateX(100%); } to { opacity: 1; transform: none; } }
@@ -968,11 +975,11 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .switch::after { transition: left 200ms var(--ease), background-color var(--dur) var(--ease); }
 
 /* ---------- Screen change ---------- */
-#view.view-enter > * { animation: view-in 220ms var(--ease) both; }
+.pane.view-enter > * { animation: view-in 220ms var(--ease) both; }
 @keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 /* Sticky bars must not move, only fade. */
-#view.view-enter > .screen-head, #view.view-enter > .w-top, #view.view-enter > .entry,
-#view.view-enter > .start-bar { animation-name: fade-in; }
+.pane.view-enter > .screen-head, .pane.view-enter > .w-top, .pane.view-enter > .entry,
+.pane.view-enter > .start-bar { animation-name: fade-in; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* ---------- Sheets: backdrop fades, sheet slides up and back down ---------- */

@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.18.2';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.19';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -236,7 +236,6 @@
 
   const go = (hash) => { if (location.hash !== hash) location.hash = hash; else render(); };
 
-  let renderToken = 0;
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   /** Small "bump" on a number that just changed (reps, drop reps). */
@@ -245,47 +244,85 @@
     el.animate([{ transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: 170, easing: 'cubic-bezier(.2,.7,.2,1)' });
   }
 
-  const ENTER_CLASSES = ['view-enter', 'enter-next', 'enter-prev', 'swipe-next', 'swipe-prev'];
+  /* ------------------------------------------------------------------ */
+  /* Pages                                                               */
+  /* The four tabs sit side by side on one strip (#track), like phone    */
+  /* home screens. Each tab has its own page (.pane) that scrolls on its */
+  /* own and remembers where you were in it. Swiping moves the strip     */
+  /* with your finger, so the next page slides into view as you drag.    */
+  /* ------------------------------------------------------------------ */
 
-  /**
-   * animate: how the new screen arrives. true = fade (a sub-screen),
-   * 'enter-next' / 'enter-prev' = slide in from the right / left (tab tap),
-   * 'swipe-next' / 'swipe-prev' = full slide after a swipe. In-place updates pass nothing.
-   */
-  async function render({ keepScroll = false, animate = false } = {}) {
-    const token = ++renderToken;
-    const y = $('#view').scrollTop;     // #view is the scrolling area
-    const screen = screens[state.route.tab];
+  const track = $('#track');
+  const paneOf = (tab) => $(`.pane[data-tab="${tab}"]`);
+  const curPane = () => paneOf(state.route.tab);
+  state.tabParts = { log: [], calendar: [], prs: [], settings: [] };   // where you were inside each tab
+  const stale = new Set(TABS);                                          // pages to redraw before showing
+  const renderTokens = {};
+
+  const hashFor = (tab) => `#${tab}${state.tabParts[tab].length ? `/${state.tabParts[tab].map(encodeURIComponent).join('/')}` : ''}`;
+
+  /** Draws one tab's page. animate: fade it in (moving to a sub-screen). */
+  async function renderPane(tab, { keepScroll = false, animate = false } = {}) {
+    const token = renderTokens[tab] = (renderTokens[tab] || 0) + 1;
+    const pane = paneOf(tab);
+    const y = pane.scrollTop;
+    const screen = screens[tab];
     let html;
     try {
-      html = await screen.render(state.route.parts);
+      html = await screen.render(state.tabParts[tab]);
     } catch (err) {
       console.error(err);
       html = `<div class="fatal"><h1>Something went wrong</h1><p>${esc(err.message)}</p></div>`;
     }
-    if (token !== renderToken) return;          // a newer render started
-    const view = $('#view');
+    if (token !== renderTokens[tab]) return;     // a newer draw of this page started
     const inner = {};                            // scroll of inner lists, e.g. the session log
-    $$('[data-keep-scroll]', view).forEach((el) => { inner[el.dataset.keepScroll] = el.scrollTop; });
-    view.classList.remove(...ENTER_CLASSES);     // in-place updates never animate
-    Object.assign(view.style, { transition: '', transform: '', opacity: '' });   // end of a swipe
-    view.innerHTML = html;
+    $$('[data-keep-scroll]', pane).forEach((el) => { inner[el.dataset.keepScroll] = el.scrollTop; });
+    pane.classList.remove('view-enter');
+    pane.innerHTML = html;
     if (animate && !reduceMotion.matches) {
-      void view.offsetWidth;                     // restart the animation
-      view.classList.add(animate === true ? 'view-enter' : animate);
+      void pane.offsetWidth;                     // restart the animation
+      pane.classList.add('view-enter');
     }
-    if (screen.after) screen.after(view);
+    if (screen.after) screen.after(pane);
+    pane.scrollTop = keepScroll ? y : 0;
+    // Inner lists keep their place on in-place updates and start at the newest entry otherwise.
+    $$('[data-keep-scroll]', pane).forEach((el) => {
+      const was = inner[el.dataset.keepScroll];
+      el.scrollTop = keepScroll && was != null ? was : el.scrollHeight;
+    });
+    stale.delete(tab);
+  }
+
+  /** Redraws the current tab. Other tabs are redrawn when you swipe or tap to them. */
+  async function render({ keepScroll = false, animate = false } = {}) {
+    const tab = state.route.tab;
+    state.tabParts[tab] = state.route.parts;
+    TABS.forEach((t) => { if (t !== tab) stale.add(t); });
+    markCurrentTab();
+    await renderPane(tab, { keepScroll, animate: animate === true });
+  }
+
+  /** Redraws neighbouring pages that may be out of date, so a swipe shows them fresh. */
+  function prepareNeighbours() {
+    const i = TABS.indexOf(state.route.tab);
+    for (const j of [i - 1, i + 1]) {
+      if (j >= 0 && j < TABS.length && stale.has(TABS[j])) renderPane(TABS[j], { keepScroll: true });
+    }
+  }
+
+  function markCurrentTab() {
     $$('.tabbar a').forEach((a) => {
       if (a.dataset.tab === state.route.tab) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     });
-    moveTabIndicator(TABS.indexOf(state.route.tab));
-    view.scrollTop = keepScroll ? y : 0;
-    // Inner lists keep their place on in-place updates and start at the newest entry otherwise.
-    $$('[data-keep-scroll]', view).forEach((el) => {
-      const was = inner[el.dataset.keepScroll];
-      el.scrollTop = keepScroll && was != null ? was : el.scrollHeight;
-    });
+    // Off-screen pages can't be tabbed into or read out.
+    $$('.pane').forEach((p) => { p.inert = p.dataset.tab !== state.route.tab; });
+  }
+
+  /** Moves the strip to a page (pos can be fractional). */
+  function placeTrack(pos, { animate = false, ms = 280 } = {}) {
+    track.style.transition = animate && !reduceMotion.matches ? `transform ${ms}ms var(--glide)` : 'none';
+    track.style.transform = `translate3d(${(-pos * 100).toFixed(3)}%, 0, 0)`;
   }
 
   window.addEventListener('hashchange', () => {
@@ -293,14 +330,19 @@
     state.route = parseRoute();
     if (prev.tab === 'settings' && prev.parts[0] === 'split' && state.route.parts[0] !== 'split') state.splitDraft = null;
     closeSheet();
-    const sameCalendar = prev.tab === 'calendar' && state.route.tab === 'calendar';
-    let animate = !sameCalendar;
+    const idx = TABS.indexOf(state.route.tab);
     if (prev.tab !== state.route.tab) {
-      const forward = TABS.indexOf(state.route.tab) > TABS.indexOf(prev.tab);
-      animate = state.pendingSwipe ? (forward ? 'swipe-next' : 'swipe-prev') : (forward ? 'enter-next' : 'enter-prev');
+      // Another tab: slide the strip there (a swipe has already put it there).
+      if (!state.settledBySwipe) placeTrack(idx, { animate: true });
+      state.settledBySwipe = false;
+      moveTabIndicator(idx);
+      const sameSpot = state.route.parts.join('/') === state.tabParts[state.route.tab].join('/');
+      render({ keepScroll: sameSpot });
+      return;
     }
-    state.pendingSwipe = false;
-    render({ keepScroll: sameCalendar, animate });
+    // Same tab, different screen inside it (e.g. Settings → Split editor): fade in.
+    const sameCalendar = state.route.tab === 'calendar';
+    render({ keepScroll: sameCalendar, animate: !sameCalendar });
   });
 
   /* ------------------------------------------------------------------ */
@@ -320,34 +362,73 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Swipe left / right on a screen to move to the next / previous tab.  */
-  /* The page follows the finger; a short or slow swipe springs back.    */
-  /* Not started on inputs, sliders, the exercise chip row, near the     */
-  /* screen edges (Android's back gesture) or while a sheet is open.     */
+  /* Swiping between pages                                               */
+  /* The strip follows your finger 1:1. Let go and it glides to the      */
+  /* nearest page, or the next one if you flicked. Touch it while it is  */
+  /* still gliding and you catch it where it is. Past the first or last  */
+  /* page it stretches and springs back. Not started on inputs, sliders, */
+  /* the exercise chips, near the screen edges (Android's back gesture)  */
+  /* or while a sheet or a clock is open.                                */
   /* ------------------------------------------------------------------ */
 
-  (function swipeTabs() {
-    const view = $('#view');
-    // Listen on the whole app (it fills the screen), not just #view, which is only as tall as its content.
+  (function pager() {
     const area = $('#app');
+    const view = $('#view');
     const EDGE = 24;
+    const FLICK = 0.35;                           // px per ms
     let s = null;
-    let busy = false;
+    let settling = null;                          // { target, timer } while gliding
+    const width = () => view.clientWidth || window.innerWidth;
     const blocked = (el) => el.closest('input, textarea, select, [contenteditable], .ex-strip, .drop-edit, .no-swipe');
+    const overlayOpen = () => sheet || ['#timer-overlay', '#hold-overlay', '#gp-overlay'].some((id) => !$(id).hidden);
 
-    function reset(animated) {
-      view.style.transition = animated ? 'transform 130ms var(--snap), opacity 130ms var(--snap)' : '';
-      view.style.transform = '';
-      view.style.opacity = '';
-      moveTabIndicator(TABS.indexOf(state.route.tab));
-      if (animated) setTimeout(() => { if (!s) view.style.transition = ''; }, 150);
+    /** Where the strip is right now, in px (mid-glide too). */
+    function currentX() {
+      const t = getComputedStyle(track).transform;
+      if (!t || t === 'none') return 0;
+      return new DOMMatrixReadOnly(t).m41;
+    }
+    function setX(x) {
+      track.style.transition = 'none';
+      track.style.transform = `translate3d(${x}px, 0, 0)`;
+      moveTabIndicator(Math.max(0, Math.min(TABS.length - 1, -x / width())), { instant: true });
+    }
+
+    function settle(target, speed = 0) {
+      const w = width();
+      const x = currentX();
+      const dist = Math.abs(-target * w - x);
+      // Faster flicks and shorter distances settle quicker; always between 140 and 320 ms.
+      const ms = Math.round(Math.max(140, Math.min(320, dist / Math.max(1.4, Math.abs(speed) * 1.6))));
+      placeTrack(target, { animate: true, ms });
+      moveTabIndicator(target);
+      clearTimeout(settling && settling.timer);
+      settling = {
+        target,
+        timer: setTimeout(() => {
+          settling = null;
+          if (TABS[target] !== state.route.tab) {
+            state.settledBySwipe = true;
+            location.hash = hashFor(TABS[target]);
+          }
+        }, reduceMotion.matches ? 0 : ms),
+      };
     }
 
     area.addEventListener('touchstart', (ev) => {
-      if (busy || ev.touches.length !== 1 || sheet || !$('#timer-overlay').hidden) return;
+      if (ev.touches.length !== 1 || overlayOpen()) return;
       const t = ev.touches[0];
       if (t.clientX < EDGE || t.clientX > window.innerWidth - EDGE || blocked(ev.target)) return;
-      s = { x0: t.clientX, y0: t.clientY, t0: performance.now(), dx: 0, lock: null, idx: TABS.indexOf(state.route.tab) };
+      const caught = !!settling;
+      let base = -TABS.indexOf(state.route.tab) * width();
+      if (caught) {                                // grab the strip where it is mid-glide
+        clearTimeout(settling.timer);
+        settling = null;
+        base = currentX();
+        setX(base);
+      }
+      s = { x0: t.clientX, y0: t.clientY, base, x: base, lock: caught ? 'x' : null, caught, samples: [[performance.now(), base]] };
+      if (caught) prepareNeighbours();
     }, { passive: true });
 
     area.addEventListener('touchmove', (ev) => {
@@ -356,44 +437,44 @@
       const dx = t.clientX - s.x0;
       const dy = t.clientY - s.y0;
       if (!s.lock) {
-        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
         s.lock = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
         if (s.lock === 'y') { s = null; return; }
-        view.classList.remove(...ENTER_CLASSES);
-        view.style.transition = 'none';
+        prepareNeighbours();
       }
-      ev.preventDefault();                      // horizontal: don't let the page scroll
-      const outOfTabs = (dx > 0 && s.idx === 0) || (dx < 0 && s.idx === TABS.length - 1);
-      s.dx = outOfTabs ? dx * 0.25 : dx;       // rubber band past the first / last tab
-      const w = window.innerWidth;
-      view.style.transform = `translateX(${s.dx}px)`;
-      view.style.opacity = String(1 - Math.min(Math.abs(s.dx) / w, 1) * 0.3);
-      moveTabIndicator(Math.max(0, Math.min(TABS.length - 1, s.idx - s.dx / w)), { instant: true });
+      ev.preventDefault();                         // horizontal: don't let the page scroll
+      const w = width();
+      const minX = -(TABS.length - 1) * w;
+      let x = s.base + dx;
+      if (x > 0) x *= 0.3;                         // rubber band past the first page
+      else if (x < minX) x = minX + (x - minX) * 0.3;   // ...and past the last
+      s.x = x;
+      setX(x);
+      const now = performance.now();
+      s.samples.push([now, x]);
+      while (s.samples.length > 2 && now - s.samples[0][0] > 90) s.samples.shift();
     }, { passive: false });
 
     function end() {
       if (!s) return;
-      const { dx, idx, t0, lock } = s;
+      const { lock, x, samples, base, caught } = s;
       s = null;
-      if (lock !== 'x') return;
-      const speed = Math.abs(dx) / Math.max(1, performance.now() - t0);   // px per ms
-      const dir = dx < 0 ? 1 : -1;
-      const target = idx + dir;
-      const commit = target >= 0 && target < TABS.length
-        && (Math.abs(dx) > window.innerWidth * 0.22 || (speed > 0.3 && Math.abs(dx) > 30));
-      if (!commit) { reset(true); return; }
-      busy = true;
-      state.pendingSwipe = true;
-      const finish = () => { busy = false; location.hash = `#${TABS[target]}`; };
-      if (reduceMotion.matches) { finish(); return; }
-      view.style.transition = 'transform 70ms cubic-bezier(0.4, 0, 1, 1), opacity 70ms linear';   // quick exit
-      view.style.transform = `translateX(${dir > 0 ? '-100%' : '100%'})`;
-      view.style.opacity = '0.4';
-      moveTabIndicator(target);
-      setTimeout(finish, 70);                 // render() clears these styles when the new tab is in
+      if (lock !== 'x' && !caught) return;
+      const w = width();
+      const [t0, x0] = samples[0];
+      const [t1, x1] = samples[samples.length - 1];
+      const speed = (x1 - x0) / Math.max(1, t1 - t0);   // px per ms; negative = towards the next page
+      const pos = -x / w;
+      const from = Math.round(-base / w);
+      let target = Math.round(pos);
+      if (speed < -FLICK) target = Math.floor(pos) + 1;
+      else if (speed > FLICK) target = Math.ceil(pos) - 1;
+      target = Math.max(0, Math.min(TABS.length - 1, Math.max(from - 1, Math.min(from + 1, target))));
+      settle(target, speed);
     }
     area.addEventListener('touchend', end);
-    area.addEventListener('touchcancel', () => { if (s) { s = null; reset(true); } });
+    area.addEventListener('touchcancel', end);
+    window.addEventListener('resize', () => placeTrack(TABS.indexOf(state.route.tab)));
   })();
 
   /* ------------------------------------------------------------------ */
@@ -2854,13 +2935,17 @@
       await refresh();
     } catch (err) {
       console.error(err);
-      $('#view').innerHTML = `<div class="fatal"><h1>Your data couldn’t be opened</h1>
+      paneOf('log').innerHTML = `<div class="fatal"><h1>Your data couldn’t be opened</h1>
         <p>${esc(err.message)}</p><p class="muted">Nothing was deleted. Reload the page to try again.</p></div>`;
       return;
     }
     applyTheme();
     state.route = parseRoute();
-    render();
+    placeTrack(TABS.indexOf(state.route.tab));
+    moveTabIndicator(TABS.indexOf(state.route.tab), { instant: true });
+    await render();
+    // Draw the other pages too, so the first swipe already has something to show.
+    for (const t of TABS) if (t !== state.route.tab) await renderPane(t);
 
     // Offline support (needs http(s), not file://).
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
