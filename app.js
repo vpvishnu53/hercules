@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.20.1';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.20.2';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1794,7 +1794,6 @@
   function paintTimer() {
     // Rest
     const left = timerLeft();
-    const restElapsed = (Date.now() - timer.startAt) / 1000;
     const restFrac = timer.done ? 0 : timer.running ? Math.min(1, left / (timer.total * 1000)) : 1;
     // Hold
     const hElapsed = holdElapsedMs() / 1000;
@@ -1808,7 +1807,8 @@
       let text;
       if (mode === 'rest') {
         frac = restFrac;
-        angle = timer.running ? (restElapsed % 60) * 6 : 0;
+        // Countdowns: the hand points at the time left, so it sweeps back towards 0 with the digits.
+        angle = timer.done ? 0 : ((timer.running ? left / 1000 : restSecs()) % 60) * 6;
         text = timer.done ? '0:00' : timer.running ? timerLeftText() : fmtDuration(restSecs());
       } else if (mode === 'gp-up') {
         const sec = swMs() / 1000;
@@ -1818,11 +1818,13 @@
       } else if (mode === 'gp-down') {
         const cd = gp.cd;
         frac = cd.done ? 0 : cd.running ? Math.min(1, cdLeftMs() / (cd.duration * 1000)) : 1;
-        angle = cd.running ? (((cd.duration * 1000 - cdLeftMs()) / 1000) % 60) * 6 : 0;
+        angle = cd.done ? 0 : ((cd.running ? cdLeftMs() / 1000 : cd.duration) % 60) * 6;
         text = cdText();
       } else {
         frac = holdFrac;
-        angle = (hElapsed % 60) * 6;
+        angle = hold.mode === 'down'
+          ? (hold.running ? ((holdLeftMs() / 1000) % 60) * 6 : (hold.result != null ? 0 : (hold.target % 60) * 6))
+          : (hElapsed % 60) * 6;
         text = holdText();
       }
       svg.querySelector('[data-arc]').setAttribute('stroke-dasharray', `${(frac * 100).toFixed(2)} 100`);
