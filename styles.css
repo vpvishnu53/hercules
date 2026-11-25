@@ -945,7 +945,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
   height: 2px;
   background: var(--accent);
   transform: translateX(0);
-  transition: transform 180ms var(--snap);
+  transition: transform 150ms var(--snap);
   pointer-events: none;
 }
 .tabbar a svg { transition: transform var(--dur) var(--ease); }
@@ -954,10 +954,10 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 /* ---------- Moving between the four tabs ---------- */
 #app { overflow-x: clip; }                 /* a page mid-swipe never scrolls the screen sideways */
 #view { will-change: auto; }
-#view.enter-next { animation: from-right 170ms var(--snap) both; }
-#view.enter-prev { animation: from-left 170ms var(--snap) both; }
-#view.swipe-next { animation: from-right-full 170ms var(--snap) both; }
-#view.swipe-prev { animation: from-left-full 170ms var(--snap) both; }
+#view.enter-next { animation: from-right 130ms var(--snap) both; }
+#view.enter-prev { animation: from-left 130ms var(--snap) both; }
+#view.swipe-next { animation: from-right-full 130ms var(--snap) both; }
+#view.swipe-prev { animation: from-left-full 130ms var(--snap) both; }
 @keyframes from-right { from { opacity: 0; transform: translateX(18%); } to { opacity: 1; transform: none; } }
 @keyframes from-left { from { opacity: 0; transform: translateX(-18%); } to { opacity: 1; transform: none; } }
 @keyframes from-right-full { from { opacity: 0.4; transform: translateX(100%); } to { opacity: 1; transform: none; } }
