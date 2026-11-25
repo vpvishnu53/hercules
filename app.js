@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.20.2';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.20.3';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1597,11 +1597,17 @@
       controls = `<div class="btns two"><button class="btn btn-secondary" data-action="cd-add" data-step="15">+15s</button>
         <button class="btn btn-primary" data-action="cd-reset">Stop</button></div>`;
     } else {
-      controls = `<div class="btns">
-          <button class="btn btn-secondary" data-action="cd-add" data-step="-15">−15s</button>
-          <button class="btn btn-primary" data-action="cd-start">Start</button>
-          <button class="btn btn-secondary" data-action="cd-add" data-step="15">+15s</button>
-        </div>`;
+      // Set the time to the second: minutes and seconds steppers (hold to repeat).
+      const m = Math.floor(cd.duration / 60);
+      const sec = cd.duration % 60;
+      const stepper = (unit, out, step, label) => `<div class="ts-col"><span class="ts-lab">${label}</span>
+          <div class="stepper-sm">
+            <button data-hold-step="${-step}" aria-label="One ${unit} less">−</button>
+            <output class="num" data-cd-${unit}>${out}</output>
+            <button data-hold-step="${step}" aria-label="One ${unit} more">+</button>
+          </div></div>`;
+      controls = `<div class="time-set">${stepper('min', m, 60, 'min')}${stepper('sec', String(sec).padStart(2, '0'), 1, 'sec')}</div>
+        <button class="btn btn-primary btn-block" data-action="cd-start">Start</button>`;
     }
     return `<div class="clock-page${cd.done ? ' done' : ''}" data-page="down">
       ${dialSvg('dial-big', 'gp-down')}
@@ -1682,6 +1688,41 @@
     else gp.cd.duration = Math.min(3600, Math.max(5, gp.cd.duration + d));
     paintTimer();
   };
+
+  /** Timer length: 1 s to 99:59. Updates the min / sec readouts without redrawing the panel. */
+  function stepTimer(d) {
+    const cd = gp.cd;
+    if (cd.running || cd.done) return;
+    cd.duration = Math.min(5999, Math.max(1, cd.duration + d));
+    const min = $('[data-cd-min]');
+    const sec = $('[data-cd-sec]');
+    if (min) min.textContent = String(Math.floor(cd.duration / 60));
+    if (sec) sec.textContent = String(cd.duration % 60).padStart(2, '0');
+    paintTimer();
+  }
+  // Press and hold − / + to repeat: one step at once, then repeats that speed up.
+  (function holdToRepeat() {
+    let timerId = null;
+    const stop = () => { clearTimeout(timerId); timerId = null; };
+    const ov = $('#gp-overlay');
+    ov.addEventListener('pointerdown', (ev) => {
+      const b = ev.target.closest('[data-hold-step]');
+      if (!b) return;
+      ev.preventDefault();
+      const d = Number(b.dataset.holdStep);
+      stepTimer(d);
+      let wait = 380;
+      const again = () => { stepTimer(d); wait = Math.max(45, wait * 0.8); timerId = setTimeout(again, wait); };
+      stop();
+      timerId = setTimeout(again, wait);
+    });
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave']) ov.addEventListener(type, stop);
+    // Keyboard: Enter / Space step once.
+    ov.addEventListener('keydown', (ev) => {
+      const b = ev.target.closest && ev.target.closest('[data-hold-step]');
+      if (b && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); stepTimer(Number(b.dataset.holdStep)); }
+    });
+  })();
   /** Stops and clears both (used when all data is deleted). */
   actions['gp-reset'] = () => {
     Object.assign(gp.sw, { running: false, acc: 0 });

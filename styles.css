@@ -947,6 +947,12 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .clock-strip { display: flex; width: 200%; }
 .clock-page { flex: 0 0 50%; min-width: 0; display: grid; justify-items: center; align-content: start; gap: 14px; padding: 0 2px; }
 .clock-page .btns { width: 100%; }
+.time-set { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+.ts-col { display: grid; gap: 4px; justify-items: center; }
+.ts-lab { font-size: 12px; font-weight: 600; color: var(--muted); }
+.time-set .stepper-sm { width: 100%; height: 48px; grid-template-columns: 44px minmax(0, 1fr) 44px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.time-set .stepper-sm button { font-size: 22px; -webkit-touch-callout: none; }
+.time-set .stepper-sm output { font-size: 22px; }
 .clock-page.done .dial-big { animation: dial-buzz 1.1s linear 0s 3; }
 
 /* ---------- Timer panel tabs ---------- */
