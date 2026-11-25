@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.21.3';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.21.4';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1368,14 +1368,14 @@
 
   const PLATES = { kg: [25, 20, 15, 10, 5, 2.5, 1.25], lb: [45, 35, 25, 10, 5, 2.5] };
   const BARS = { kg: [20, 15, 10], lb: [45, 35, 25] };
-  // Bumper plates: colour, diameter and thickness in mm. All share the 450 mm
-  // diameter and only the thickness changes, so every plate is easy to tap.
+  // Bumper plates: colour, diameter and thickness in mm. 5 kg and up share the
+  // 450 mm diameter and only the thickness changes; the small change plates are smaller.
   // The drawing uses these sizes, so the bar is drawn to scale.
   const PLATE_LOOK = {
     kg: { 25: ['#D0342C', 450, 70], 20: ['#2F5FBF', 450, 58], 15: ['#E8BC1E', 450, 46], 10: ['#2E8A50', 450, 34],
-      5: ['#F4F4F2', 450, 26], 2.5: ['#26292B', 450, 20], 1.25: ['#B9C0C8', 450, 16] },
+      5: ['#F4F4F2', 450, 26], 2.5: ['#26292B', 190, 20], 1.25: ['#B9C0C8', 160, 16] },
     lb: { 45: ['#2F5FBF', 450, 62], 35: ['#E8BC1E', 450, 50], 25: ['#2E8A50', 450, 40], 10: ['#F4F4F2', 450, 28],
-      5: ['#26292B', 450, 22], 2.5: ['#B9C0C8', 450, 16] },
+      5: ['#26292B', 190, 22], 2.5: ['#B9C0C8', 160, 16] },
   };
   // Olympic bar, mm: 415 loadable sleeve, 50 sleeve, 28 shaft, collar flange 30 thick.
   const BAR_MM = { sleeve: 415, sleeveDia: 50, shaftDia: 28, collar: 30, collarDia: 78, shaft: 70 };
