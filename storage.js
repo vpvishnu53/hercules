@@ -206,6 +206,7 @@
       theme: 'system',        // 'system' | 'light' | 'dark'
       accent: 'green',        // colour option: green (default), blue, red, orange, yellow, graphite
       plateBar: { kg: 20, lb: 45 },   // bar used by the plate calculator, per unit
+      plateSmall: { kg: 1.25, lb: 2.5 },   // smallest plate the gym has, per unit
       setupDone: false,       // the first-launch "set up your split" card was used or skipped
       rpeEnabled: false,
       // placement: 'panel' (a row above the set entry) or 'corner' (an hourglass button)

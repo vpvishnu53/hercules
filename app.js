@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.21.4';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.21.5';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1366,16 +1366,24 @@
   /* ---------- Plate calculator ---------- */
   /* Tap the plates on one side of the bar; it adds up the total. */
 
-  const PLATES = { kg: [25, 20, 15, 10, 5, 2.5, 1.25], lb: [45, 35, 25, 10, 5, 2.5] };
+  const PLATES = { kg: [25, 20, 15, 10, 5, 2.5], lb: [45, 35, 25, 10, 5] };
+  // The smallest plate depends on the gym, so it's picked in the sheet (first is the default).
+  const SMALL_PLATES = { kg: [1.25, 1, 0.5], lb: [2.5, 1.25] };
   const BARS = { kg: [20, 15, 10], lb: [45, 35, 25] };
+  const smallPlate = (unit) => {
+    const v = (state.settings.plateSmall || {})[unit];
+    return SMALL_PLATES[unit].includes(v) ? v : SMALL_PLATES[unit][0];
+  };
+  const plateList = (unit) => [...PLATES[unit], smallPlate(unit)];
   // Bumper plates: colour, diameter and thickness in mm. 5 kg and up share the
   // 450 mm diameter and only the thickness changes; the small change plates are smaller.
   // The drawing uses these sizes, so the bar is drawn to scale.
   const PLATE_LOOK = {
-    kg: { 25: ['#D0342C', 450, 70], 20: ['#2F5FBF', 450, 58], 15: ['#E8BC1E', 450, 46], 10: ['#2E8A50', 450, 34],
-      5: ['#F4F4F2', 450, 26], 2.5: ['#26292B', 190, 20], 1.25: ['#B9C0C8', 160, 16] },
-    lb: { 45: ['#2F5FBF', 450, 62], 35: ['#E8BC1E', 450, 50], 25: ['#2E8A50', 450, 40], 10: ['#F4F4F2', 450, 28],
-      5: ['#26292B', 190, 22], 2.5: ['#B9C0C8', 160, 16] },
+    kg: { 25: ['#D0342C', 450, 80], 20: ['#2F5FBF', 450, 66], 15: ['#E8BC1E', 450, 54], 10: ['#2E8A50', 450, 42],
+      5: ['#F4F4F2', 450, 32], 2.5: ['#26292B', 210, 26], 1.25: ['#B9C0C8', 175, 23], 1: ['#B9C0C8', 170, 22],
+      0.5: ['#B9C0C8', 150, 20] },
+    lb: { 45: ['#2F5FBF', 450, 72], 35: ['#E8BC1E', 450, 58], 25: ['#2E8A50', 450, 46], 10: ['#F4F4F2', 450, 34],
+      5: ['#26292B', 210, 26], 2.5: ['#B9C0C8', 175, 23], 1.25: ['#B9C0C8', 160, 21] },
   };
   // Olympic bar, mm: 415 loadable sleeve, 50 sleeve, 28 shaft, collar flange 30 thick.
   const BAR_MM = { sleeve: 415, sleeveDia: 50, shaftDia: 28, collar: 30, collarDia: 78, shaft: 70 };
@@ -1405,9 +1413,8 @@
     const rects = side.map((p) => {
       const { fill, dia, thick, ink } = plateLook(unit, p);
       const cx = x + thick / 2;
-      // The label shrinks to fit thin plates; the thinnest goes without.
-      const label = thick >= 20
-        ? `<text x="${cx}" y="${cy}" fill="${ink}" font-size="${Math.min(24, thick - 4)}" transform="rotate(-90 ${cx} ${cy})">${fmt(p)}</text>` : '';
+      // Every plate is labelled; the label shrinks to fit the thin ones.
+      const label = `<text x="${cx}" y="${cy}" fill="${ink}" font-size="${Math.min(26, thick - 5)}" transform="rotate(-90 ${cx} ${cy})">${fmt(p)}</text>`;
       const g = `<g class="plate" data-action="plate-off" data-plate="${p}" role="button" aria-label="Take off ${fmt(p)}">
           <rect x="${x}" y="${cy - dia / 2}" width="${thick}" height="${dia}" rx="2" fill="${fill}"/>${label}</g>`;
       x += thick;
@@ -1416,7 +1423,8 @@
     const sleeveLen = Math.max(B.sleeve, x - sleeveX + 6);
     const vbW = sleeveX + sleeveLen + 4;
 
-    const chips = PLATES[unit].map((p) => {
+    const small = smallPlate(unit);
+    const chips = plateList(unit).map((p) => {
       const { fill, ink } = plateLook(unit, p);
       const n = side.filter((q) => q === p).length;
       return `<button class="plate-chip" data-action="plate-on" data-plate="${p}" style="background:${fill};color:${ink}"
@@ -1426,6 +1434,8 @@
     return `<h2 class="sheet-title">Plates</h2>
       <div class="row" style="padding:4px 0 10px;border:0;min-height:0"><span class="row-label">Bar</span>
         ${seg('plates-bar', String(bar), BARS[unit].map((b) => [String(b), `${b} ${unit}`]))}</div>
+      <div class="row" style="padding:0 0 10px;border:0;min-height:0"><span class="row-label">Smallest plate</span>
+        ${seg('plates-small', String(small), SMALL_PLATES[unit].map((p) => [String(p), `${p} ${unit}`]))}</div>
       <svg class="plates-svg" viewBox="0 0 ${vbW} 480" data-action="plate-pop" role="button" aria-label="One side of the bar. Tap to take off the outermost plate">
         <rect class="bar-shaft" x="0" y="${cy - B.shaftDia / 2}" width="${B.shaft}" height="${B.shaftDia}"/>
         <rect class="bar-sleeve" x="${sleeveX}" y="${cy - B.sleeveDia / 2}" width="${sleeveLen}" height="${B.sleeveDia}" rx="3"/>
@@ -1450,6 +1460,15 @@
   actions['plates-bar'] = async (el) => {
     const plateBar = { ...(state.settings.plateBar || {}), [Units.unit]: Number(el.dataset.value) };
     state.settings = await Store.updateSettings({ plateBar });
+    redrawPlates();
+  };
+  // Swaps the smallest plate; any already on the bar become the new one.
+  actions['plates-small'] = async (el) => {
+    const unit = Units.unit;
+    const from = smallPlate(unit);
+    const to = Number(el.dataset.value);
+    state.settings = await Store.updateSettings({ plateSmall: { ...(state.settings.plateSmall || {}), [unit]: to } });
+    plateLoad[unit] = plateLoad[unit].map((p) => (p === from ? to : p));
     redrawPlates();
   };
   actions['plate-on'] = (el) => {

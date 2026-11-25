@@ -924,7 +924,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .plates-total .big small { font-size: 15px; color: var(--muted); font-weight: 600; }
 .plates-total .muted { font-size: 13px; }
 .plate-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; }
-.plate-chip { position: relative; height: 48px; border: 1px solid color-mix(in srgb, var(--fg) 55%, transparent); border-radius: 3px; font-family: var(--f-num); font-size: 15px; font-weight: 700; cursor: pointer; touch-action: manipulation; transition: transform 90ms var(--ease); }
+.plate-chip { position: relative; height: 52px; border: 1px solid color-mix(in srgb, var(--fg) 55%, transparent); border-radius: 3px; font-family: var(--f-num); font-size: 16px; font-weight: 700; cursor: pointer; touch-action: manipulation; transition: transform 90ms var(--ease); }
 .plate-chip:active { transform: scale(0.94); }
 .plate-chip small { position: absolute; top: 2px; right: 4px; font-size: 10px; font-weight: 700; opacity: 0.8; }
 .plates-hint { font-size: 12px; margin: 8px 0 12px; }
