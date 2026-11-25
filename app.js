@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.22.1';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.22.2';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -518,6 +518,21 @@
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && sheet) closeSheet(null);
+    // Enter in a one-line field is "done": the keyboard goes away and the field lets go.
+    // (In a form it still submits first, as before.)
+    const el = ev.target;
+    if (ev.key === 'Enter' && !ev.isComposing && el instanceof HTMLInputElement && !NO_DONE.has(el.type)) {
+      if (el.form) setTimeout(() => el.blur(), 0);
+      else { ev.preventDefault(); el.blur(); }
+    }
+  });
+  const NO_DONE = new Set(['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'file', 'color']);
+  // Label the keyboard's Enter key "Done" on fields that don't submit anything.
+  document.addEventListener('focusin', (ev) => {
+    const el = ev.target;
+    if (el instanceof HTMLInputElement && !el.form && !el.hasAttribute('enterkeyhint') && !NO_DONE.has(el.type)) {
+      el.setAttribute('enterkeyhint', 'done');
+    }
   });
 
   /* ------------------------------------------------------------------ */
