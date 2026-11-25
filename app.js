@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.19.3';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.20';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1541,105 +1541,202 @@
 
 
   /* ----- General clock (the hourglass in the corner of every workout) ----- */
-  /* A stopwatch by default, or a countdown timer. Independent of rest and hold. */
+  /*
+   * A stopwatch and a countdown timer with separate states, so both can run.
+   * They sit side by side in the clock panel: swipe between them or tap the
+   * Stopwatch / Timer buttons. Independent of the rest and hold timers.
+   */
 
-  const gp = { mode: 'up', running: false, done: false, startAt: 0, endAt: 0, acc: 0, duration: 60, overlay: false, interval: null };
-  const gpLeftMs = () => Math.max(0, gp.endAt - Date.now());
-  const gpElapsedMs = () => gp.acc + (gp.running ? Date.now() - gp.startAt : 0);
-  const gpActive = () => gp.running || gp.done || (gp.mode === 'up' && gp.acc > 0);
-  const gpText = (precise) => {
-    if (gp.mode === 'down') return gp.done ? '0:00' : fmtDuration(gp.running ? Math.ceil(gpLeftMs() / 1000) : gp.duration);
-    const ms = gpElapsedMs();
+  const gp = {
+    view: 'up',                                   // page showing: 'up' stopwatch, 'down' timer
+    overlay: false,
+    interval: null,
+    sw: { running: false, startAt: 0, acc: 0 },
+    cd: { running: false, done: false, endAt: 0, duration: 60 },
+    get running() { return this.sw.running || this.cd.running; },
+  };
+  const swMs = () => gp.sw.acc + (gp.sw.running ? Date.now() - gp.sw.startAt : 0);
+  const swActive = () => gp.sw.running || gp.sw.acc > 0;
+  const swText = (precise) => {
+    const ms = swMs();
     const sec = Math.floor(ms / 1000);
     return precise ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}` : fmtDuration(sec);
   };
+  const cdLeftMs = () => Math.max(0, gp.cd.endAt - Date.now());
+  const cdActive = () => gp.cd.running || gp.cd.done;
+  const cdText = () => (gp.cd.done ? '0:00' : fmtDuration(gp.cd.running ? Math.ceil(cdLeftMs() / 1000) : gp.cd.duration));
 
   /** The hourglass button in the bottom-right corner of the workout screen. */
   function cornerTimerHtml() {
-    return `<button class="corner-timer${gp.done ? ' done' : ''}${gp.running ? ' running' : ''}" data-action="gp-open"
-      aria-label="${gp.mode === 'down' ? 'Timer' : 'Stopwatch'}">${hourglassSvg('hg-corner')}<span class="t num" data-corner-text></span></button>`;
+    return `<button class="corner-timer${gp.cd.done ? ' done' : ''}${gp.running ? ' running' : ''}" data-action="gp-open"
+      aria-label="Stopwatch and timer">${hourglassSvg('hg-corner')}<span class="t num" data-corner-text></span></button>`;
   }
 
-  function renderGpOverlay() {
-    const ov = $('#gp-overlay');
-    if (!gp.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
-    ov.hidden = false;
-    const busy = gp.running || gp.done;
+  function gpPageHtml(mode) {
+    if (mode === 'up') {
+      const sw = gp.sw;
+      const controls = sw.running
+        ? `<button class="btn btn-secondary" data-action="sw-reset">Reset</button>
+           <button class="btn btn-primary" data-action="sw-stop">Stop</button>`
+        : `<button class="btn btn-secondary" data-action="sw-reset">Reset</button>
+           <button class="btn btn-primary" data-action="sw-start">${sw.acc ? 'Resume' : 'Start'}</button>`;
+      return `<div class="clock-page" data-page="up">
+        ${dialSvg('dial-big', 'gp-up')}
+        <span class="title">Stopwatch</span>
+        <div class="btns two">${controls}</div>
+      </div>`;
+    }
+    const cd = gp.cd;
     let controls;
-    if (gp.mode === 'up') {
-      controls = gp.running
-        ? `<button class="btn btn-secondary" data-action="gp-reset">Reset</button>
-           <button class="btn btn-primary" data-action="gp-stop">Stop</button>`
-        : `<button class="btn btn-secondary" data-action="gp-reset">Reset</button>
-           <button class="btn btn-primary" data-action="gp-start">${gp.acc ? 'Resume' : 'Start'}</button>`;
-    } else if (gp.done) {
-      controls = `<button class="btn btn-secondary" data-action="gp-start">Again</button>
-        <button class="btn btn-primary" data-action="gp-reset">Done</button>`;
-    } else if (gp.running) {
-      controls = `<button class="btn btn-secondary" data-action="gp-add" data-step="15">+15s</button>
-        <button class="btn btn-primary" data-action="gp-reset">Stop</button>`;
+    if (cd.done) {
+      controls = `<div class="btns two"><button class="btn btn-secondary" data-action="cd-start">Again</button>
+        <button class="btn btn-primary" data-action="cd-reset">Done</button></div>`;
+    } else if (cd.running) {
+      controls = `<div class="btns two"><button class="btn btn-secondary" data-action="cd-add" data-step="15">+15s</button>
+        <button class="btn btn-primary" data-action="cd-reset">Stop</button></div>`;
     } else {
       controls = `<div class="btns">
-          <button class="btn btn-secondary" data-action="gp-add" data-step="-15">−15s</button>
-          <button class="btn btn-primary" data-action="gp-start">Start</button>
-          <button class="btn btn-secondary" data-action="gp-add" data-step="15">+15s</button>
+          <button class="btn btn-secondary" data-action="cd-add" data-step="-15">−15s</button>
+          <button class="btn btn-primary" data-action="cd-start">Start</button>
+          <button class="btn btn-secondary" data-action="cd-add" data-step="15">+15s</button>
         </div>`;
     }
-    ov.innerHTML = `<div class="timer-panel${gp.done ? ' done' : ''}" role="dialog" aria-label="Timer">
-      ${busy ? '' : `<div class="seg timer-tabs" role="group">
-        <button data-action="gp-mode" data-mode="up" aria-pressed="${gp.mode === 'up'}">Stopwatch</button>
-        <button data-action="gp-mode" data-mode="down" aria-pressed="${gp.mode === 'down'}">Timer</button>
-      </div>`}
-      ${dialSvg('dial-big', gp.mode === 'up' ? 'gp-up' : 'gp-down')}
-      <span class="title">${gp.done ? "Time's up" : gp.mode === 'up' ? 'Stopwatch' : gp.running ? 'Timer' : 'Set a time'}</span>
-      ${gp.mode === 'down' && !gp.running && !gp.done ? controls : `<div class="btns two">${controls}</div>`}
-      <button class="text-btn" data-action="gp-hide">${busy ? 'Hide' : 'Close'}</button>
+    return `<div class="clock-page${cd.done ? ' done' : ''}" data-page="down">
+      ${dialSvg('dial-big', 'gp-down')}
+      <span class="title">${cd.done ? "Time's up" : cd.running ? 'Timer' : 'Set a time'}</span>
+      ${controls}
     </div>`;
   }
 
+  /** Draws the clock panel. Only opening it animates; updates replace its content in place. */
+  function renderGpOverlay() {
+    const ov = $('#gp-overlay');
+    if (!gp.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
+    const wasOpen = !ov.hidden && !!ov.firstElementChild;
+    ov.hidden = false;
+    const idx = gp.view === 'down' ? 1 : 0;
+    ov.innerHTML = `<div class="timer-panel gp-panel${wasOpen ? ' still' : ''}" role="dialog" aria-label="Stopwatch and timer">
+      <div class="seg timer-tabs" role="group">
+        <button data-action="gp-view" data-mode="up" aria-pressed="${idx === 0}">Stopwatch</button>
+        <button data-action="gp-view" data-mode="down" aria-pressed="${idx === 1}">Timer</button>
+      </div>
+      <div class="clock-view"><div class="clock-strip" style="transform:translateX(${-idx * 50}%)">${gpPageHtml('up')}${gpPageHtml('down')}</div></div>
+      <button class="text-btn" data-action="gp-hide">${gp.running || gp.cd.done ? 'Hide' : 'Close'}</button>
+    </div>`;
+  }
+
+  /** Slides the panel to the stopwatch or the timer without redrawing it. */
+  function setGpView(mode, animate = true) {
+    gp.view = mode;
+    const strip = $('#gp-overlay .clock-strip');
+    if (strip) {
+      strip.style.transition = animate && !reduceMotion.matches ? 'transform 260ms var(--glide)' : 'none';
+      strip.style.transform = `translateX(${mode === 'down' ? -50 : 0}%)`;
+    }
+    $$('#gp-overlay .timer-tabs button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+  }
+
   function gpTick() {
-    if (gp.running && gp.mode === 'down' && gpLeftMs() <= 0) {
-      Object.assign(gp, { running: false, done: true, overlay: true });
-      clearInterval(gp.interval);
+    if (gp.cd.running && cdLeftMs() <= 0) {
+      Object.assign(gp.cd, { running: false, done: true });
+      gp.overlay = true;
+      gp.view = 'down';
+      gpRun();
       if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
       setTimeout(wakeOff, 15000);
-      refreshRestUi();
       return;
     }
     paintTimer();
   }
+  /** (Re)starts the tick while either clock runs, and redraws. */
   function gpRun() {
     clearInterval(gp.interval);
-    gp.interval = setInterval(gpTick, gp.mode === 'up' ? 100 : 200);
-    wakeOn();
+    if (gp.running) { gp.interval = setInterval(gpTick, 100); wakeOn(); } else { wakeOff(); }
     refreshRestUi();
   }
-  actions['gp-open'] = () => { gp.overlay = true; renderGpOverlay(); paintTimer(); };
-  actions['gp-hide'] = () => { gp.overlay = false; renderGpOverlay(); };
-  actions['gp-mode'] = (el) => { gp.mode = el.dataset.mode; gp.acc = 0; renderGpOverlay(); paintTimer(); refreshRestUi(); };
-  actions['gp-start'] = () => {
-    if (gp.mode === 'down') Object.assign(gp, { running: true, done: false, startAt: Date.now(), endAt: Date.now() + gp.duration * 1000 });
-    else Object.assign(gp, { running: true, startAt: Date.now() });
-    gpRun();
-  };
-  actions['gp-stop'] = () => {
-    if (gp.running) Object.assign(gp, { running: false, acc: gp.acc + (Date.now() - gp.startAt) });
-    clearInterval(gp.interval);
-    wakeOff();
-    refreshRestUi();
-  };
-  actions['gp-reset'] = () => {
-    Object.assign(gp, { running: false, done: false, acc: 0 });
-    clearInterval(gp.interval);
-    wakeOff();
-    refreshRestUi();
-  };
-  actions['gp-add'] = (el) => {
-    const d = Number(el.dataset.step);
-    if (gp.running) gp.endAt = Math.max(Date.now() + 1000, gp.endAt + d * 1000);
-    else gp.duration = Math.min(3600, Math.max(5, gp.duration + d));
+
+  actions['gp-open'] = () => {
+    gp.view = cdActive() ? 'down' : swActive() ? 'up' : gp.view;
+    gp.overlay = true;
+    renderGpOverlay();
     paintTimer();
   };
+  actions['gp-hide'] = () => { gp.overlay = false; renderGpOverlay(); };
+  actions['gp-view'] = (el) => setGpView(el.dataset.mode);
+  actions['sw-start'] = () => { Object.assign(gp.sw, { running: true, startAt: Date.now() }); gpRun(); };
+  actions['sw-stop'] = () => {
+    if (gp.sw.running) Object.assign(gp.sw, { running: false, acc: gp.sw.acc + (Date.now() - gp.sw.startAt) });
+    gpRun();
+  };
+  actions['sw-reset'] = () => { Object.assign(gp.sw, { running: false, acc: 0 }); gpRun(); };
+  actions['cd-start'] = () => {
+    Object.assign(gp.cd, { running: true, done: false, endAt: Date.now() + gp.cd.duration * 1000 });
+    gpRun();
+  };
+  actions['cd-reset'] = () => { Object.assign(gp.cd, { running: false, done: false }); gpRun(); };
+  actions['cd-add'] = (el) => {
+    const d = Number(el.dataset.step);
+    if (gp.cd.running) gp.cd.endAt = Math.max(Date.now() + 1000, gp.cd.endAt + d * 1000);
+    else gp.cd.duration = Math.min(3600, Math.max(5, gp.cd.duration + d));
+    paintTimer();
+  };
+  /** Stops and clears both (used when all data is deleted). */
+  actions['gp-reset'] = () => {
+    Object.assign(gp.sw, { running: false, acc: 0 });
+    Object.assign(gp.cd, { running: false, done: false });
+    gpRun();
+  };
+
+  /* Swipe between the stopwatch and the timer: follows the finger, catchable mid-slide. */
+  (function clockSwipe() {
+    const ov = $('#gp-overlay');
+    let s = null;
+    ov.addEventListener('touchstart', (ev) => {
+      const view = ev.target.closest('.clock-view');
+      if (!view || ev.touches.length !== 1) return;
+      const strip = view.querySelector('.clock-strip');
+      const t = ev.touches[0];
+      const cur = new DOMMatrixReadOnly(getComputedStyle(strip).transform).m41;   // catch it where it is
+      strip.style.transition = 'none';
+      strip.style.transform = `translateX(${cur}px)`;
+      s = { x0: t.clientX, y0: t.clientY, base: cur, x: cur, w: view.clientWidth, strip, lock: null, samples: [[performance.now(), cur]] };
+    }, { passive: true });
+    ov.addEventListener('touchmove', (ev) => {
+      if (!s) return;
+      const t = ev.touches[0];
+      const dx = t.clientX - s.x0;
+      const dy = t.clientY - s.y0;
+      if (!s.lock) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        s.lock = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+        if (s.lock === 'y') { setGpView(gp.view); s = null; return; }
+      }
+      ev.preventDefault();
+      let x = s.base + dx;
+      if (x > 0) x *= 0.3;
+      else if (x < -s.w) x = -s.w + (x + s.w) * 0.3;
+      s.x = x;
+      s.strip.style.transform = `translateX(${x}px)`;
+      const now = performance.now();
+      s.samples.push([now, x]);
+      while (s.samples.length > 2 && now - s.samples[0][0] > 90) s.samples.shift();
+    }, { passive: false });
+    const end = () => {
+      if (!s) return;
+      const { x, w, samples, lock } = s;
+      s = null;
+      if (lock !== 'x') { setGpView(gp.view, false); return; }
+      const [t0, x0] = samples[0];
+      const [t1, x1] = samples[samples.length - 1];
+      const speed = (x1 - x0) / Math.max(1, t1 - t0);
+      let target = Math.round(-x / w);
+      if (speed < -0.35) target = 1;
+      else if (speed > 0.35) target = 0;
+      setGpView(Math.max(0, Math.min(1, target)) === 1 ? 'down' : 'up');
+    };
+    ov.addEventListener('touchend', end);
+    ov.addEventListener('touchcancel', end);
+  })();
 
   /* ----- Hold timer (timed exercises) ----- */
 
@@ -1670,13 +1767,14 @@
   function renderHoldOverlay() {
     const ov = $('#hold-overlay');
     if (!hold.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
+    const wasOpen = !ov.hidden && !!ov.firstElementChild;
     ov.hidden = false;
     const finished = !hold.running && hold.result != null;
     const name = exerciseName(hold.exerciseId);
     const title = finished
       ? (hold.done ? `Done · ${fmtDuration(hold.result)}` : `Held ${fmtDuration(hold.result)}`)
       : hold.mode === 'down' ? `Hold for ${fmtDuration(hold.target)}` : 'Stopwatch';
-    ov.innerHTML = `<div class="timer-panel${hold.done ? ' done' : ''}" role="dialog" aria-label="${esc(name)} timer">
+    ov.innerHTML = `<div class="timer-panel${hold.done ? ' done' : ''}${wasOpen ? ' still' : ''}" role="dialog" aria-label="${esc(name)} timer">
       <span class="panel-ex">${esc(name)}</span>
       ${dialSvg('dial-big', hold.mode)}
       <span class="title">${esc(title)}</span>
@@ -1711,14 +1809,15 @@
         angle = timer.running ? (restElapsed % 60) * 6 : 0;
         text = timer.done ? '0:00' : timer.running ? timerLeftText() : fmtDuration(restSecs());
       } else if (mode === 'gp-up') {
-        const sec = gpElapsedMs() / 1000;
+        const sec = swMs() / 1000;
         frac = (sec % 60) / 60;
         angle = (sec % 60) * 6;
-        text = gpText(true);
+        text = swText(true);
       } else if (mode === 'gp-down') {
-        frac = gp.done ? 0 : gp.running ? Math.min(1, gpLeftMs() / (gp.duration * 1000)) : 1;
-        angle = gp.running ? (((gp.duration * 1000 - gpLeftMs()) / 1000) % 60) * 6 : 0;
-        text = gpText();
+        const cd = gp.cd;
+        frac = cd.done ? 0 : cd.running ? Math.min(1, cdLeftMs() / (cd.duration * 1000)) : 1;
+        angle = cd.running ? (((cd.duration * 1000 - cdLeftMs()) / 1000) % 60) * 6 : 0;
+        text = cdText();
       } else {
         frac = holdFrac;
         angle = (hElapsed % 60) * 6;
@@ -1733,13 +1832,14 @@
     // Rest hourglasses drain over the rest; the hold hourglass drains over the hold (or trickles each minute).
     $$('[data-hourglass="hg-rest-row"]').forEach((svg) => setSand(svg, restFrac));
     // Corner hourglass: drains with the timer, trickles once a minute with the stopwatch.
-    const gpSand = gp.mode === 'down'
-      ? (gp.done ? 0 : gp.running ? gpLeftMs() / (gp.duration * 1000) : 1)
-      : (gpActive() ? 1 - ((gpElapsedMs() / 1000) % 60) / 60 : 1);
+    // (The timer wins when it is in use; otherwise the stopwatch.)
+    const gpSand = cdActive()
+      ? (gp.cd.done ? 0 : cdLeftMs() / (gp.cd.duration * 1000))
+      : (swActive() ? 1 - ((swMs() / 1000) % 60) / 60 : 1);
     $$('[data-hourglass="hg-corner"]').forEach((svg) => setSand(svg, gpSand));
     $$('[data-hourglass="hg-hold"]').forEach((svg) => setSand(svg, hold.running ? (hold.mode === 'down' ? holdFrac : 1 - holdFrac) : 1));
     const t = $('[data-corner-text]');
-    if (t) t.textContent = gpActive() ? gpText() : '';
+    if (t) t.textContent = cdActive() ? cdText() : swActive() ? swText(false) : '';
   }
 
   function refreshRestUi() {
@@ -1759,6 +1859,7 @@
   function renderOverlay() {
     const ov = $('#timer-overlay');
     if (!timer.overlay) { ov.hidden = true; ov.innerHTML = ''; return; }
+    const wasOpen = !ov.hidden && !!ov.firstElementChild;
     ov.hidden = false;
     let controls;
     if (timer.done) {
@@ -1778,7 +1879,7 @@
         </div>
         <button class="text-btn" data-action="timer-hide">Close</button>`;
     }
-    ov.innerHTML = `<div class="timer-panel${timer.done ? ' done' : ''}" role="dialog" aria-label="Rest timer">
+    ov.innerHTML = `<div class="timer-panel${timer.done ? ' done' : ''}${wasOpen ? ' still' : ''}" role="dialog" aria-label="Rest timer">
       <span class="panel-ex">Rest</span>
       ${dialSvg('dial-big', 'rest')}
       <span class="title">${timer.done ? 'Rest over' : timer.running ? 'Resting' : 'Rest'}</span>
@@ -1898,7 +1999,7 @@
     $(`#${id}`).addEventListener('click', (ev) => {
       if (ev.target.id !== id) return;
       if (id === 'gp-overlay') {
-        if (gp.done) actions['gp-reset']();
+        if (gp.cd.done) actions['cd-reset']();
         gp.overlay = false; renderGpOverlay();
       } else if (id === 'timer-overlay') {
         if (timer.done) timerStop();

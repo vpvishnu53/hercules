@@ -897,6 +897,17 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .rest-start { gap: 6px; }
 .rest-start .hourglass { width: 13px; height: 17px; }
 
+/* Clock panels only animate when they open; button presses update them in place. */
+.timer-panel.still { animation: none; }
+
+/* Corner clock: stopwatch and timer side by side, swipe or tap to switch. */
+.gp-panel { overflow: hidden; }
+.clock-view { justify-self: stretch; overflow: hidden; touch-action: pan-y; }
+.clock-strip { display: flex; width: 200%; }
+.clock-page { flex: 0 0 50%; min-width: 0; display: grid; justify-items: center; align-content: start; gap: 14px; padding: 0 2px; }
+.clock-page .btns { width: 100%; }
+.clock-page.done .dial-big { animation: dial-shake 0.5s ease-in-out 0s 6; }
+
 /* ---------- Timer panel tabs ---------- */
 .timer-tabs { align-self: stretch; display: grid; grid-template-columns: 1fr 1fr; }
 .timer-panel .btns .btn[disabled] { opacity: 0.4; cursor: default; }
