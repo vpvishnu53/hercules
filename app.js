@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.18';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.18.1';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -336,11 +336,11 @@
     const blocked = (el) => el.closest('input, textarea, select, [contenteditable], .ex-strip, .drop-edit, .no-swipe');
 
     function reset(animated) {
-      view.style.transition = animated ? 'transform 220ms var(--ease), opacity 220ms var(--ease)' : '';
+      view.style.transition = animated ? 'transform 160ms var(--snap), opacity 160ms var(--snap)' : '';
       view.style.transform = '';
       view.style.opacity = '';
       moveTabIndicator(TABS.indexOf(state.route.tab));
-      if (animated) setTimeout(() => { if (!s) view.style.transition = ''; }, 240);
+      if (animated) setTimeout(() => { if (!s) view.style.transition = ''; }, 180);
     }
 
     area.addEventListener('touchstart', (ev) => {
@@ -380,17 +380,17 @@
       const dir = dx < 0 ? 1 : -1;
       const target = idx + dir;
       const commit = target >= 0 && target < TABS.length
-        && (Math.abs(dx) > window.innerWidth * 0.28 || (speed > 0.45 && Math.abs(dx) > 40));
+        && (Math.abs(dx) > window.innerWidth * 0.22 || (speed > 0.3 && Math.abs(dx) > 30));
       if (!commit) { reset(true); return; }
       busy = true;
       state.pendingSwipe = true;
       const finish = () => { busy = false; location.hash = `#${TABS[target]}`; };
       if (reduceMotion.matches) { finish(); return; }
-      view.style.transition = 'transform 170ms var(--ease), opacity 170ms var(--ease)';
+      view.style.transition = 'transform 100ms cubic-bezier(0.4, 0, 1, 1), opacity 100ms linear';   // quick exit
       view.style.transform = `translateX(${dir > 0 ? '-100%' : '100%'})`;
       view.style.opacity = '0.4';
       moveTabIndicator(target);
-      setTimeout(finish, 170);                 // render() clears these styles when the new tab is in
+      setTimeout(finish, 100);                 // render() clears these styles when the new tab is in
     }
     area.addEventListener('touchend', end);
     area.addEventListener('touchcancel', () => { if (s) { s = null; reset(true); } });

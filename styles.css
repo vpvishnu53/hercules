@@ -37,6 +37,7 @@
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --dur-fast: 110ms;
   --dur: 180ms;
+  --snap: cubic-bezier(0.2, 0.9, 0.3, 1);   /* fast start, crisp stop: page changes */
 
   --r: 4px;
   --f-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -944,7 +945,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
   height: 2px;
   background: var(--accent);
   transform: translateX(0);
-  transition: transform 260ms var(--ease);
+  transition: transform 180ms var(--snap);
   pointer-events: none;
 }
 .tabbar a svg { transition: transform var(--dur) var(--ease); }
@@ -953,10 +954,10 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 /* ---------- Moving between the four tabs ---------- */
 #app { overflow-x: clip; }                 /* a page mid-swipe never scrolls the screen sideways */
 #view { will-change: auto; }
-#view.enter-next { animation: from-right 240ms var(--ease) both; }
-#view.enter-prev { animation: from-left 240ms var(--ease) both; }
-#view.swipe-next { animation: from-right-full 260ms var(--ease) both; }
-#view.swipe-prev { animation: from-left-full 260ms var(--ease) both; }
+#view.enter-next { animation: from-right 170ms var(--snap) both; }
+#view.enter-prev { animation: from-left 170ms var(--snap) both; }
+#view.swipe-next { animation: from-right-full 170ms var(--snap) both; }
+#view.swipe-prev { animation: from-left-full 170ms var(--snap) both; }
 @keyframes from-right { from { opacity: 0; transform: translateX(18%); } to { opacity: 1; transform: none; } }
 @keyframes from-left { from { opacity: 0; transform: translateX(-18%); } to { opacity: 1; transform: none; } }
 @keyframes from-right-full { from { opacity: 0.4; transform: translateX(100%); } to { opacity: 1; transform: none; } }
