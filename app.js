@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.19.1';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.19.2';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -2280,10 +2280,14 @@
    * points: [{ x: dayNum, y, hollow, detail }]  (detail = HTML shown on tap)
    * opts: { line, yFormat, yInteger }
    */
-  function chartSvg(points, { line = false, yFormat = (v) => String(v), yInteger = false } = {}) {
+  /**
+   * marks: [{ i, text, place: 'above' | 'below' }] labels a few points, e.g. the highest
+   * and lowest bodyweight. The y range gets a little headroom so the labels fit.
+   */
+  function chartSvg(points, { line = false, yFormat = (v) => String(v), yInteger = false, marks = [] } = {}) {
     const W = Math.max(280, Math.min(window.innerWidth, 560) - 42);
     const H = 210;
-    const m = { l: 42, r: 12, t: 12, b: 26 };
+    const m = { l: 42, r: 12, t: marks.length ? 20 : 12, b: 26 };
     const xs = points.map((p) => p.x);
     let x0 = Math.min(...xs);
     let x1 = Math.max(...xs);
@@ -2291,7 +2295,10 @@
     const pad = (x1 - x0) * 0.04;
     x0 -= pad; x1 += pad;
     const ysRaw = points.map((p) => p.y);
-    let yTicks = niceTicks(Math.min(...ysRaw), Math.max(...ysRaw));
+    let yLo = Math.min(...ysRaw);
+    let yHi = Math.max(...ysRaw);
+    if (marks.length) { const pad = Math.max((yHi - yLo) * 0.18, 0.5); yLo -= pad; yHi += pad; }
+    let yTicks = niceTicks(yLo, yHi);
     if (yInteger) yTicks = [...new Set(yTicks.map(Math.round))];
     const y0 = yTicks[0];
     const y1 = yTicks[yTicks.length - 1];
@@ -2309,8 +2316,17 @@
     const dots = points.map((p, i) => `<circle class="pt${p.hollow ? ' hollow' : ''}" data-pt="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="${p.hollow ? 4.5 : 5}"/>`).join('');
     const hits = points.map((p, i) => `<circle class="hit" tabindex="0" role="button" aria-label="Point ${i + 1} of ${points.length}" data-action="chart-point" data-i="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="13"/>`).join('');
 
+    const labels = marks.filter((k) => points[k.i]).map((k) => {
+      const cx = sx(points[k.i].x);
+      const cy = sy(points[k.i].y);
+      const anchor = cx > W - m.r - 40 ? 'end' : cx < m.l + 40 ? 'start' : 'middle';
+      const ty = k.place === 'below' ? cy + 18 : cy - 11;
+      return `<circle class="pt-ring" cx="${f(cx)}" cy="${f(cy)}" r="8.5"/>
+        <text class="mark-label" x="${f(cx)}" y="${f(ty)}" text-anchor="${anchor}">${esc(k.text)}</text>`;
+    }).join('');
+
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">
-      ${grid}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}"/>${xt}${path}${dots}${hits}</svg>`;
+      ${grid}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}"/>${xt}${path}${labels}${dots}${hits}</svg>`;
   }
 
   actions['chart-point'] = (el) => {
@@ -2374,11 +2390,20 @@
         <span class="muted">${d.sessionId ? 'After a workout' : 'Weigh-in'}</span></span>`,
     }));
     const list = all.slice().reverse().slice(0, state.prs.showAll ? undefined : 20);
+    // Highest and lowest weigh-ins (the most recent one if there's a tie).
+    let hi = 0;
+    let lo = 0;
+    days.forEach((d, i) => { if (d.kg >= days[hi].kg) hi = i; if (d.kg <= days[lo].kg) lo = i; });
+    const cell = (label, d) => `<div><span>${label}</span><b class="num">${esc(Units.format(d.kg))}<small> ${Units.unit}</small></b><span>${esc(prettyDate(d.date))}</span></div>`;
+    const marks = days.length > 1 && days[hi].kg !== days[lo].kg
+      ? [{ i: hi, text: `High ${Units.format(days[hi].kg)}`, place: 'above' }, { i: lo, text: `Low ${Units.format(days[lo].kg)}`, place: 'below' }]
+      : [];
     return `<div class="pr-headline"><span class="big num">${esc(Units.format(latest.kg))}<small> ${Units.unit}</small></span>
         <span class="sub">${esc(prettyDate(latest.date))} · ${esc(diffText)}</span></div>
+      <div class="stats bw-stats">${cell('Latest', latest)}${cell('Highest', days[hi])}${cell('Lowest', days[lo])}</div>
       ${days.length > 1 ? `<div class="chart-box has-detail">
         <div class="chart-key"><span><i></i>Bodyweight (${Units.unit})</span></div>
-        ${chartSvg(points, { line: true })}
+        ${chartSvg(points, { line: true, marks })}
       </div>
       <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the weigh-in.</span></div>` : ''}
       ${logBtn}
