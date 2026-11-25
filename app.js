@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.21.5';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.21.6';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1950,7 +1950,15 @@
           : (hElapsed % 60) * 6;
         text = holdText();
       }
-      svg.querySelector('[data-arc]').setAttribute('stroke-dasharray', `${(frac * 100).toFixed(2)} 100`);
+      // The ring glides between ticks, but snaps on a freshly drawn dial or a big jump
+      // (wrapping past 60 s, reset), so it never sweeps backwards to catch up.
+      const arc = svg.querySelector('[data-arc]');
+      const prev = arc.dataset.frac == null ? null : Number(arc.dataset.frac);
+      const snap = prev == null || Math.abs(frac - prev) > 0.3;
+      if (snap) arc.style.transition = 'none';
+      arc.setAttribute('stroke-dasharray', `${(frac * 100).toFixed(2)} 100`);
+      arc.dataset.frac = String(frac);
+      if (snap) { arc.getBoundingClientRect(); arc.style.transition = ''; }
       svg.querySelector('[data-hand]').setAttribute('transform', `rotate(${angle.toFixed(1)} 100 100)`);
       svg.querySelector('[data-readout]').textContent = text;
     });
