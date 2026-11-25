@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.22';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.22.1';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -30,6 +30,12 @@
   const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
   const fmtDuration = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 
+  // Media-style symbols for the clock buttons.
+  const MEDIA = {
+    play: '<svg class="media-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>',
+    pause: '<svg class="media-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="4.5" width="4.5" height="15" rx="1"/><rect x="14" y="4.5" width="4.5" height="15" rx="1"/></svg>',
+    stop: '<svg class="media-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg>',
+  };
   const ICON = {
     chev: '<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg>',
     back: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>',
@@ -1655,9 +1661,9 @@
       const sw = gp.sw;
       const controls = sw.running
         ? `<button class="btn btn-secondary" data-action="sw-reset">Reset</button>
-           <button class="btn btn-primary" data-action="sw-stop">Stop</button>`
+           <button class="btn btn-primary" data-action="sw-stop" aria-label="Pause">${MEDIA.pause}</button>`
         : `<button class="btn btn-secondary" data-action="sw-reset">Reset</button>
-           <button class="btn btn-primary" data-action="sw-start">${sw.acc ? 'Resume' : 'Start'}</button>`;
+           <button class="btn btn-primary" data-action="sw-start" aria-label="${sw.acc ? 'Resume' : 'Start'}">${MEDIA.play}</button>`;
       return `<div class="clock-page" data-page="up">
         ${dialSvg('dial-big', 'gp-up')}
         <div class="btns two">${controls}</div>
@@ -1672,11 +1678,11 @@
         <button class="btn btn-secondary" data-action="cd-start">Again</button>
         <button class="btn btn-primary" data-action="cd-reset">Done</button></div>`;
     } else if (cdOn()) {
-      controls = `<div class="btns"><button class="btn btn-secondary" data-action="cd-reset">Stop</button>
+      controls = `<div class="btns"><button class="btn btn-secondary" data-action="cd-reset" aria-label="Stop">${MEDIA.stop}</button>
         ${add}
         ${cd.paused
-          ? '<button class="btn btn-primary" data-action="cd-resume">Resume</button>'
-          : '<button class="btn btn-primary" data-action="cd-pause">Pause</button>'}</div>`;
+          ? `<button class="btn btn-primary" data-action="cd-resume" aria-label="Resume">${MEDIA.play}</button>`
+          : `<button class="btn btn-primary" data-action="cd-pause" aria-label="Pause">${MEDIA.pause}</button>`}</div>`;
     } else {
       // Set the time to the second: minutes and seconds steppers (hold to repeat).
       const m = Math.floor(cd.duration / 60);

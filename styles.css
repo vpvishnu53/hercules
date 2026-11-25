@@ -944,6 +944,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .reps.time output { font-size: 24px; }
 .timer-panel .panel-ex { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: -6px; }
 .timer-panel .btns.two { grid-template-columns: 1fr 1fr; }
+.media-ico { width: 20px; height: 20px; fill: currentColor; display: block; margin: 0 auto; }
 .rest-start { gap: 6px; }
 .rest-start .hourglass { width: 13px; height: 17px; }
 
