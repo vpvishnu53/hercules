@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.19';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.19.1';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -2415,10 +2415,10 @@
       </select></span></div>`;
 
     if (p.view === 'bodyweight') {
-      return `${head('PRs')}<div class="pr-controls">${viewSelect}</div>${await renderBodyweightView()}<div style="height:24px"></div>`;
+      return `${head('Progress')}<div class="pr-controls">${viewSelect}</div>${await renderBodyweightView()}<div style="height:24px"></div>`;
     }
     if (!trained.length) {
-      return `${head('PRs')}<div class="pr-controls">${viewSelect}</div><div class="placeholder"><strong>No workouts yet.</strong>
+      return `${head('Progress')}<div class="pr-controls">${viewSelect}</div><div class="placeholder"><strong>No workouts yet.</strong>
         <span>Every exercise needs two sessions as a starting point. From the third session on, heavier sets and more reps at the same weight become milestones here.</span></div>`;
     }
 
@@ -2432,7 +2432,7 @@
     else if (p.view === 'weight') body = renderWeightView(sessions, milestones);
     else body = renderRepsView(sessions, milestones);
 
-    return `${head('PRs')}<div class="pr-controls">${controls}</div>${body}<div style="height:24px"></div>`;
+    return `${head('Progress')}<div class="pr-controls">${controls}</div>${body}<div style="height:24px"></div>`;
   }
 
   function renderAllMilestones(milestones) {
