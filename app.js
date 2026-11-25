@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.20.4';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.21';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1364,70 +1364,105 @@
 
 
   /* ---------- Plate calculator ---------- */
-  /* Plates per side for the weight in the entry field, on a bar the user picks. */
+  /* Tap the plates on one side of the bar; it adds up the total. */
 
   const PLATES = { kg: [25, 20, 15, 10, 5, 2.5, 1.25], lb: [45, 35, 25, 10, 5, 2.5] };
   const BARS = { kg: [20, 15, 10], lb: [45, 35, 25] };
-  const PLATE_SIZE = { 25: 1, 20: 0.92, 15: 0.82, 10: 0.7, 5: 0.54, 2.5: 0.42, 1.25: 0.34, 45: 1, 35: 0.88 };
-
-  /** Greedy split of one side into plates. Returns { plates, rest } in display units. */
-  function platesFor(total, bar, unit) {
-    let side = Math.round(((total - bar) / 2) * 1000) / 1000;
-    const plates = [];
-    for (const p of PLATES[unit]) {
-      while (side >= p - 1e-6) { plates.push(p); side = Math.round((side - p) * 1000) / 1000; }
-    }
-    return { plates, rest: side };
-  }
+  // Competition-style colours, one per plate. `ink` is the label colour on it.
+  const PLATE_LOOK = {
+    kg: { 25: ['#D0342C', 1, 18], 20: ['#2F5FBF', 0.94, 16], 15: ['#E8BC1E', 0.86, 14], 10: ['#2E8A50', 0.76, 12],
+      5: ['#F4F4F2', 0.6, 10], 2.5: ['#26292B', 0.5, 9], 1.25: ['#B9C0C8', 0.42, 8] },
+    lb: { 45: ['#2F5FBF', 1, 18], 35: ['#E8BC1E', 0.9, 15], 25: ['#2E8A50', 0.8, 13], 10: ['#F4F4F2', 0.64, 11],
+      5: ['#26292B', 0.52, 9], 2.5: ['#B9C0C8', 0.44, 8] },
+  };
+  const DARK_INK = new Set(['#E8BC1E', '#F4F4F2', '#B9C0C8']);
+  const plateLook = (unit, p) => {
+    const [fill, size, width] = PLATE_LOOK[unit][p];
+    return { fill, size, width, ink: DARK_INK.has(fill) ? '#141414' : '#FFFFFF' };
+  };
+  // Plates on one side, per unit. Kept while the app is open so you can add as you load.
+  const plateLoad = { kg: [], lb: [] };
 
   function platesHtml() {
     const unit = Units.unit;
     const bar = (state.settings.plateBar || {})[unit] || BARS[unit][0];
-    const parsed = entryKg(state.entry.weightText, state.entry.exactKg);
-    const total = parsed.kg == null ? null : Units.display(parsed.kg);
     const fmt = (n) => String(Math.round(n * 100) / 100);
-    let body;
-    if (parsed.error) body = `<p class="sheet-body">${esc(parsed.error)}</p>`;
-    else if (total == null || total <= 0) body = '<p class="sheet-body">Type a weight above 0 to see the plates. Blank means bodyweight, and negative means assisted.</p>';
-    else if (total < bar - 1e-6) body = `<p class="sheet-body">${fmt(total)} ${unit} is lighter than a ${fmt(bar)} ${unit} bar.</p>`;
-    else {
-      const { plates, rest } = platesFor(total, bar, unit);
-      const exact = rest < 0.01;
-      const loaded = bar + 2 * plates.reduce((a, b) => a + b, 0);
-      // Side view of one half of the bar: sleeve with plates from the collar outward.
-      let x = 34;
-      const rects = plates.map((p) => {
-        const h = 92 * (PLATE_SIZE[p] || 0.4);
-        const w = p >= 10 ? 13 : 9;
-        const r = `<rect class="plate" x="${x}" y="${(60 - h / 2).toFixed(1)}" width="${w}" height="${h.toFixed(1)}" rx="1.5"/>
-          <text class="plate-label" x="${x + w / 2}" y="${(60 + h / 2 + 12).toFixed(1)}">${fmt(p)}</text>`;
-        x += Math.max(w + 3, 24);           // leave room for each label underneath
-        return r;
-      }).join('');
-      body = `
-        <svg class="plates-svg" viewBox="0 0 280 124" role="img" aria-label="One side of the bar: ${plates.length ? plates.map(fmt).join(', ') : 'no plates'}">
-          <rect class="bar-shaft" x="0" y="57" width="30" height="6"/>
-          <rect class="bar-collar" x="28" y="50" width="5" height="20"/>
-          <rect class="bar-sleeve" x="33" y="56" width="${Math.max(120, x - 20)}" height="8"/>
-          ${rects}
-        </svg>
-        <p class="plates-line"><b>Each side:</b> <span class="num">${plates.length ? plates.map(fmt).join(' + ') : 'nothing, just the bar'}</span></p>
-        <p class="plates-line muted num">${fmt(bar)} bar${plates.length ? ` + 2 × ${fmt((loaded - bar) / 2)}` : ''} = ${fmt(loaded)} ${unit}</p>
-        ${exact ? '' : `<p class="plates-line" style="color:var(--danger)">${fmt(total)} ${unit} can't be loaded exactly with standard plates. Closest below is ${fmt(loaded)} ${unit}.</p>`}`;
-    }
-    return `<h2 class="sheet-title">Plates${total > 0 ? ` for <span class="num">${fmt(total)} ${unit}</span>` : ''}</h2>
+    // Heaviest goes on first, nearest the collar, whatever order they were tapped in.
+    const side = [...plateLoad[unit]].sort((a, b) => b - a);
+    const perSide = side.reduce((a, b) => a + b, 0);
+    const total = bar + 2 * perSide;
+
+    // Side view of one half of the bar, plates packed against the collar.
+    let x = 34;
+    const rects = side.map((p) => {
+      const { fill, size, width, ink } = plateLook(unit, p);
+      const h = 104 * size;
+      const y = 64 - h / 2;
+      const cx = x + width / 2;
+      const g = `<g class="plate" data-action="plate-off" data-plate="${p}" role="button" aria-label="Take off ${fmt(p)}">
+          <rect x="${x + 0.5}" y="${y.toFixed(1)}" width="${width - 1}" height="${h.toFixed(1)}" rx="1" fill="${fill}"/>
+          <text x="${cx}" y="64" fill="${ink}" transform="rotate(-90 ${cx} 64)">${fmt(p)}</text></g>`;
+      x += width;
+      return g;
+    }).join('');
+    const vbW = Math.max(280, x + 16);
+
+    const chips = PLATES[unit].map((p) => {
+      const { fill, ink } = plateLook(unit, p);
+      const n = side.filter((q) => q === p).length;
+      return `<button class="plate-chip" data-action="plate-on" data-plate="${p}" style="background:${fill};color:${ink}"
+        aria-label="Add ${fmt(p)} ${unit} to each side">${fmt(p)}${n ? `<small>×${n}</small>` : ''}</button>`;
+    }).join('');
+
+    return `<h2 class="sheet-title">Plates</h2>
       <div class="row" style="padding:4px 0 10px;border:0;min-height:0"><span class="row-label">Bar</span>
         ${seg('plates-bar', String(bar), BARS[unit].map((b) => [String(b), `${b} ${unit}`]))}</div>
-      ${body}
-      <button class="btn btn-secondary btn-block" data-action="sheet-cancel" style="margin-top:14px">Close</button>`;
+      <svg class="plates-svg" viewBox="0 0 ${vbW} 128" role="img" aria-label="One side of the bar">
+        <rect class="bar-shaft" x="0" y="61" width="30" height="6"/>
+        <rect class="bar-collar" x="28" y="52" width="6" height="24"/>
+        <rect class="bar-sleeve" x="34" y="60" width="${vbW - 34}" height="8"/>
+        ${rects}
+      </svg>
+      <div class="plates-total"><span class="num big">${fmt(total)} <small>${unit}</small></span>
+        <span class="muted num">${fmt(bar)} bar${side.length ? ` + 2 × ${fmt(perSide)}` : ''}</span></div>
+      <div class="plate-chips">${chips}</div>
+      <p class="plates-hint muted">Tap a plate to put one on each side. Tap it on the bar to take it off.</p>
+      <div class="sheet-actions">
+        <button class="btn btn-secondary" data-action="plate-clear"${side.length ? '' : ' disabled'}>Clear</button>
+        <button class="btn btn-primary" data-action="plate-use">Use ${fmt(total)} ${unit}</button>
+      </div>`;
   }
 
+  const redrawPlates = () => {
+    const sheetEl = $('#sheet-root .sheet');
+    if (sheetEl) sheetEl.innerHTML = platesHtml();
+  };
   actions.plates = () => new Promise((resolve) => openSheet(platesHtml(), { resolve, label: 'Plate calculator' }));
   actions['plates-bar'] = async (el) => {
     const plateBar = { ...(state.settings.plateBar || {}), [Units.unit]: Number(el.dataset.value) };
     state.settings = await Store.updateSettings({ plateBar });
-    const sheetEl = $('#sheet-root .sheet');
-    if (sheetEl) sheetEl.innerHTML = platesHtml();
+    redrawPlates();
+  };
+  actions['plate-on'] = (el) => {
+    plateLoad[Units.unit].push(Number(el.dataset.plate));
+    if (navigator.vibrate) navigator.vibrate(8);
+    redrawPlates();
+  };
+  actions['plate-off'] = (el) => {
+    const load = plateLoad[Units.unit];
+    const i = load.lastIndexOf(Number(el.dataset.plate));
+    if (i >= 0) load.splice(i, 1);
+    redrawPlates();
+  };
+  actions['plate-clear'] = () => { plateLoad[Units.unit].length = 0; redrawPlates(); };
+  // Puts the loaded total into the weight field.
+  actions['plate-use'] = async () => {
+    const unit = Units.unit;
+    const bar = (state.settings.plateBar || {})[unit] || BARS[unit][0];
+    const total = Math.round((bar + 2 * plateLoad[unit].reduce((a, b) => a + b, 0)) * 100) / 100;
+    if (state.entry) Object.assign(state.entry, { weightText: String(total), exactKg: undefined });
+    closeSheet(null);
+    await render({ keepScroll: true });
   };
 
   /* ---------- PR banner ---------- */

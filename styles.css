@@ -913,12 +913,21 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 
 /* ---------- Plate calculator ---------- */
 .note-row .plates-btn { margin-left: auto; flex: none; }
-.plates-svg { display: block; width: 100%; height: auto; margin: 4px 0 8px; }
+.plates-svg { display: block; width: 100%; height: auto; margin: 2px 0 6px; }
 .plates-svg .bar-shaft, .plates-svg .bar-sleeve { fill: var(--line-strong); }
 .plates-svg .bar-collar { fill: var(--muted); }
-.plates-svg .plate { fill: var(--fg); }
-.plates-svg .plate-label { fill: var(--muted); font-family: var(--f-num); font-size: 10px; font-weight: 600; text-anchor: middle; }
-.plates-line { margin: 4px 0; font-size: 15px; }
+.plates-svg .plate { cursor: pointer; }
+.plates-svg .plate rect { stroke: var(--fg); stroke-opacity: 0.55; stroke-width: 1; }
+.plates-svg .plate text { font-family: var(--f-num); font-size: 9px; font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.plates-total { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
+.plates-total .big { font-size: 30px; font-weight: 700; line-height: 1; }
+.plates-total .big small { font-size: 15px; color: var(--muted); font-weight: 600; }
+.plates-total .muted { font-size: 13px; }
+.plate-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; }
+.plate-chip { position: relative; height: 48px; border: 1px solid color-mix(in srgb, var(--fg) 55%, transparent); border-radius: 3px; font-family: var(--f-num); font-size: 15px; font-weight: 700; cursor: pointer; touch-action: manipulation; transition: transform 90ms var(--ease); }
+.plate-chip:active { transform: scale(0.94); }
+.plate-chip small { position: absolute; top: 2px; right: 4px; font-size: 10px; font-weight: 700; opacity: 0.8; }
+.plates-hint { font-size: 12px; margin: 8px 0 12px; }
 
 /* ---------- Hold timer (timed exercises) ---------- */
 #hold-overlay { z-index: 56; }
