@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.21';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.21.1';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1417,7 +1417,7 @@
     return `<h2 class="sheet-title">Plates</h2>
       <div class="row" style="padding:4px 0 10px;border:0;min-height:0"><span class="row-label">Bar</span>
         ${seg('plates-bar', String(bar), BARS[unit].map((b) => [String(b), `${b} ${unit}`]))}</div>
-      <svg class="plates-svg" viewBox="0 0 ${vbW} 128" role="img" aria-label="One side of the bar">
+      <svg class="plates-svg" viewBox="0 0 ${vbW} 128" data-action="plate-pop" role="button" aria-label="One side of the bar. Tap to take off the outermost plate">
         <rect class="bar-shaft" x="0" y="61" width="30" height="6"/>
         <rect class="bar-collar" x="28" y="52" width="6" height="24"/>
         <rect class="bar-sleeve" x="34" y="60" width="${vbW - 34}" height="8"/>
@@ -1426,7 +1426,7 @@
       <div class="plates-total"><span class="num big">${fmt(total)} <small>${unit}</small></span>
         <span class="muted num">${fmt(bar)} bar${side.length ? ` + 2 × ${fmt(perSide)}` : ''}</span></div>
       <div class="plate-chips">${chips}</div>
-      <p class="plates-hint muted">Tap a plate to put one on each side. Tap it on the bar to take it off.</p>
+      <p class="plates-hint muted">Buttons add a plate to each side. Tap a plate on the bar to take it off, or the bar to take off the outermost.</p>
       <div class="sheet-actions">
         <button class="btn btn-secondary" data-action="plate-clear"${side.length ? '' : ' disabled'}>Clear</button>
         <button class="btn btn-primary" data-action="plate-use">Use ${fmt(total)} ${unit}</button>
@@ -1452,6 +1452,14 @@
     const load = plateLoad[Units.unit];
     const i = load.lastIndexOf(Number(el.dataset.plate));
     if (i >= 0) load.splice(i, 1);
+    redrawPlates();
+  };
+  // Tapping the bar itself (not a plate) takes off the outermost plate: the lightest.
+  actions['plate-pop'] = () => {
+    const load = plateLoad[Units.unit];
+    if (!load.length) return;
+    const lightest = Math.min(...load);
+    load.splice(load.lastIndexOf(lightest), 1);
     redrawPlates();
   };
   actions['plate-clear'] = () => { plateLoad[Units.unit].length = 0; redrawPlates(); };

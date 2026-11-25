@@ -913,7 +913,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 
 /* ---------- Plate calculator ---------- */
 .note-row .plates-btn { margin-left: auto; flex: none; }
-.plates-svg { display: block; width: 100%; height: auto; margin: 2px 0 6px; }
+.plates-svg { display: block; width: 100%; height: auto; margin: 2px 0 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .plates-svg .bar-shaft, .plates-svg .bar-sleeve { fill: var(--line-strong); }
 .plates-svg .bar-collar { fill: var(--muted); }
 .plates-svg .plate { cursor: pointer; }
