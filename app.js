@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.20';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.20.1';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1024,6 +1024,8 @@
     // The session log: every main set of the session in the order logged, each
     // labelled with its exercise, numbered per exercise. Drops sit under their set.
     const perExercise = {};
+    // Drop sets can only be added to the most recently logged set.
+    const lastMainId = (mainSets(session).slice(-1)[0] || {}).id;
     const setsHtml = mainSets(session).map((set) => {
       const i = perExercise[set.exerciseId] = (perExercise[set.exerciseId] || 0) + 1;
       const drops = dropsOf(session, set.id);
@@ -1038,7 +1040,7 @@
             <span class="lg-val num"><span class="w">${weightHtml(set.weightKg)}</span> <span class="x">${timesSign(set)}</span> <span class="r">${amountText(set)}</span>${set.rpe != null ? `<span class="rpe">RPE ${set.rpe}</span>` : ''}</span>
           </span>
           <span>${pr ? `<span class="pr-badge" title="${pr.includes('weight') ? 'Weight PR' : set.durationSec != null ? 'Time PR' : 'Rep PR'}">${TROPHY}PR</span>` : ''}</span>
-          ${setTimed || dd ? '<span></span>' : `<button class="lg-drop" data-action="drop-open" data-id="${esc(set.id)}" aria-label="Add a drop set to ${esc(exerciseName(set.exerciseId))} set ${i}">+ Drop</button>`}
+          ${setTimed || dd || set.id !== lastMainId ? '<span></span>' : `<button class="lg-drop" data-action="drop-open" data-id="${esc(set.id)}" aria-label="Add a drop set to ${esc(exerciseName(set.exerciseId))} set ${i}">+ Drop</button>`}
           <button class="row-menu" data-action="set-menu" data-id="${esc(set.id)}" data-n="${i}" aria-label="${esc(exerciseName(set.exerciseId))} set ${i} options">⋯</button>
         </div>
         ${set.note ? `<div class="set-note">${esc(set.note)}</div>` : ''}
