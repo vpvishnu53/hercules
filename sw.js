@@ -6,7 +6,7 @@
  * in fonts/ and cached with the app. Workout data is not here: it lives in
  * localStorage via storage.js.
  */
-const VERSION = 'v0.21.6';
+const VERSION = 'v0.22';
 const APP_CACHE = `wt-app-${VERSION}`;
 const FONT_CACHE = 'wt-fonts-v1';
 const APP_FILES = [
@@ -65,7 +65,9 @@ self.addEventListener('fetch', (event) => {
   // App files: answer from cache, refresh in the background.
   event.respondWith(caches.open(APP_CACHE).then(async (cache) => {
     // The app's start page can be opened as "/" or "/index.html"; both use one entry.
-    const key = url.pathname.endsWith('/') ? new URL('./index.html', self.registration.scope).href : url.origin + url.pathname;
+    // (Only the app's own folder: any other address goes to the server, which answers 404.)
+    const home = new URL(self.registration.scope).pathname;
+    const key = url.pathname === home ? new URL('./index.html', self.registration.scope).href : url.origin + url.pathname;
     const hit = await cache.match(key);
     // 'no-cache' asks the server whether the file changed instead of trusting the HTTP cache.
     const refresh = fetch(url.href, { cache: 'no-cache', credentials: 'same-origin' }).then((res) => {

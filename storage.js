@@ -207,6 +207,7 @@
       accent: 'green',        // colour option: green (default), blue, red, orange, yellow, graphite
       plateBar: { kg: 20, lb: 45 },   // bar used by the plate calculator, per unit
       plateSmall: { kg: 1.25, lb: 2.5 },   // smallest plate the gym has, per unit
+      timerAddSec: 15,        // what the timers' + / − buttons add or take off
       setupDone: false,       // the first-launch "set up your split" card was used or skipped
       rpeEnabled: false,
       // placement: 'panel' (a row above the set entry) or 'corner' (an hourglass button)
@@ -371,6 +372,7 @@
         if (rest.units !== undefined) assert(['kg', 'lb'].includes(rest.units), 'Units must be kg or lb.');
         if (rest.theme !== undefined) assert(['system', 'light', 'dark'].includes(rest.theme), 'Unknown theme.');
         if (rest.accent !== undefined) assert(ACCENTS.includes(rest.accent), 'Unknown colour.');
+        if (rest.timerAddSec !== undefined) assert([10, 15, 30, 60].includes(rest.timerAddSec), 'Add time must be 10, 15, 30 or 60 seconds.');
         Object.assign(s, rest);
         if (restTimer) {
           Object.assign(s.restTimer, restTimer);

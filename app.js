@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.21.6';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.22';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -1605,7 +1605,7 @@
         <span class="label">${timer.done ? 'Rest over' : 'Resting'}<b data-timer-text>${timer.done ? '0:00' : timerLeftText()}</b></span>
         ${timer.done
           ? '<button class="btn btn-secondary btn-sm" data-action="timer-stop">Dismiss</button>'
-          : `<button class="btn btn-secondary btn-sm" data-action="timer-add" data-step="15">+15s</button>
+          : `<button class="btn btn-secondary btn-sm" data-action="timer-add" data-step="${addSec()}">+${addSec()}s</button>
              <button class="btn btn-secondary btn-sm" data-action="timer-stop">Skip</button>`}
       </div>`;
     }
@@ -1626,7 +1626,8 @@
     overlay: false,
     interval: null,
     sw: { running: false, startAt: 0, acc: 0 },
-    cd: { running: false, done: false, endAt: 0, duration: 60 },
+    // duration: the time set (s). total: this run's length incl. added time (ms). leftMs: time left while paused.
+    cd: { running: false, paused: false, done: false, endAt: 0, duration: 60, total: 60000, leftMs: 0 },
     get running() { return this.sw.running || this.cd.running; },
   };
   const swMs = () => gp.sw.acc + (gp.sw.running ? Date.now() - gp.sw.startAt : 0);
@@ -1636,9 +1637,12 @@
     const sec = Math.floor(ms / 1000);
     return precise ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}` : fmtDuration(sec);
   };
-  const cdLeftMs = () => Math.max(0, gp.cd.endAt - Date.now());
-  const cdActive = () => gp.cd.running || gp.cd.done;
-  const cdText = () => (gp.cd.done ? '0:00' : fmtDuration(gp.cd.running ? Math.ceil(cdLeftMs() / 1000) : gp.cd.duration));
+  const cdLeftMs = () => (gp.cd.paused ? gp.cd.leftMs : Math.max(0, gp.cd.endAt - Date.now()));
+  const cdOn = () => gp.cd.running || gp.cd.paused;          // counting down, or paused part way
+  const cdActive = () => cdOn() || gp.cd.done;
+  const cdText = () => (gp.cd.done ? '0:00' : fmtDuration(cdOn() ? Math.ceil(cdLeftMs() / 1000) : gp.cd.duration));
+  /** Seconds the add-time buttons add (Settings → Add time). */
+  const addSec = () => state.settings.timerAddSec || 15;
 
   /** The hourglass button in the bottom-right corner of the workout screen. */
   function cornerTimerHtml() {
@@ -1661,12 +1665,18 @@
     }
     const cd = gp.cd;
     let controls;
+    const add = `<button class="btn btn-secondary" data-action="cd-add">+${addSec()}s</button>`;
     if (cd.done) {
-      controls = `<div class="btns two"><button class="btn btn-secondary" data-action="cd-start">Again</button>
+      // +time here is a snooze: it runs a short countdown of that length.
+      controls = `<div class="btns">${add}
+        <button class="btn btn-secondary" data-action="cd-start">Again</button>
         <button class="btn btn-primary" data-action="cd-reset">Done</button></div>`;
-    } else if (cd.running) {
-      controls = `<div class="btns two"><button class="btn btn-secondary" data-action="cd-add" data-step="15">+15s</button>
-        <button class="btn btn-primary" data-action="cd-reset">Stop</button></div>`;
+    } else if (cdOn()) {
+      controls = `<div class="btns"><button class="btn btn-secondary" data-action="cd-reset">Stop</button>
+        ${add}
+        ${cd.paused
+          ? '<button class="btn btn-primary" data-action="cd-resume">Resume</button>'
+          : '<button class="btn btn-primary" data-action="cd-pause">Pause</button>'}</div>`;
     } else {
       // Set the time to the second: minutes and seconds steppers (hold to repeat).
       const m = Math.floor(cd.duration / 60);
@@ -1682,7 +1692,7 @@
     }
     return `<div class="clock-page${cd.done ? ' done' : ''}" data-page="down">
       ${dialSvg('dial-big', 'gp-down')}
-      ${cd.running ? '' : `<span class="title">${cd.done ? "Time's up" : 'Set a time'}</span>`}
+      ${cd.running ? '' : `<span class="title">${cd.done ? "Time's up" : cd.paused ? 'Paused' : 'Set a time'}</span>`}
       ${controls}
     </div>`;
   }
@@ -1700,7 +1710,7 @@
         <button data-action="gp-view" data-mode="down" aria-pressed="${idx === 1}">Timer</button>
       </div>
       <div class="clock-view"><div class="clock-strip" style="transform:translateX(${-idx * 50}%)">${gpPageHtml('up')}${gpPageHtml('down')}</div></div>
-      <button class="text-btn" data-action="gp-hide">${gp.running || gp.cd.done ? 'Hide' : 'Close'}</button>
+      <button class="text-btn" data-action="gp-hide">${gp.running || cdActive() ? 'Hide' : 'Close'}</button>
     </div>`;
     fitClockView(false);
   }
@@ -1759,22 +1769,38 @@
     gpRun();
   };
   actions['sw-reset'] = () => { Object.assign(gp.sw, { running: false, acc: 0 }); gpRun(); };
-  actions['cd-start'] = () => {
-    Object.assign(gp.cd, { running: true, done: false, endAt: Date.now() + gp.cd.duration * 1000 });
+  /** Starts a countdown of `sec` seconds (the set time, or a snooze). */
+  function cdRun(sec) {
+    Object.assign(gp.cd, { running: true, paused: false, done: false, endAt: Date.now() + sec * 1000, total: sec * 1000 });
+    gpRun();
+  }
+  actions['cd-start'] = () => cdRun(gp.cd.duration);
+  actions['cd-reset'] = () => { Object.assign(gp.cd, { running: false, paused: false, done: false }); gpRun(); };
+  actions['cd-pause'] = () => {
+    if (!gp.cd.running) return;
+    Object.assign(gp.cd, { leftMs: cdLeftMs(), running: false, paused: true });
     gpRun();
   };
-  actions['cd-reset'] = () => { Object.assign(gp.cd, { running: false, done: false }); gpRun(); };
-  actions['cd-add'] = (el) => {
-    const d = Number(el.dataset.step);
-    if (gp.cd.running) gp.cd.endAt = Math.max(Date.now() + 1000, gp.cd.endAt + d * 1000);
-    else gp.cd.duration = Math.min(3600, Math.max(5, gp.cd.duration + d));
+  actions['cd-resume'] = () => {
+    if (!gp.cd.paused) return;
+    Object.assign(gp.cd, { endAt: Date.now() + gp.cd.leftMs, running: true, paused: false });
+    gpRun();
+  };
+  actions['cd-add'] = () => {
+    const cd = gp.cd;
+    const ms = addSec() * 1000;
+    if (cd.done) return cdRun(addSec());
+    if (cd.running) cd.endAt += ms;
+    else if (cd.paused) cd.leftMs += ms;
+    else return;
+    cd.total += ms;
     paintTimer();
   };
 
   /** Timer length: 1 s to 99:59. Updates the min / sec readouts without redrawing the panel. */
   function stepTimer(d) {
     const cd = gp.cd;
-    if (cd.running || cd.done) return;
+    if (cdActive()) return;
     cd.duration = Math.min(5999, Math.max(1, cd.duration + d));
     const min = $('[data-cd-min]');
     const sec = $('[data-cd-sec]');
@@ -1940,8 +1966,8 @@
         text = swText(true);
       } else if (mode === 'gp-down') {
         const cd = gp.cd;
-        frac = cd.done ? 0 : cd.running ? Math.min(1, cdLeftMs() / (cd.duration * 1000)) : 1;
-        angle = cd.done ? 0 : ((cd.running ? cdLeftMs() / 1000 : cd.duration) % 60) * 6;
+        frac = cd.done ? 0 : cdOn() ? Math.min(1, cdLeftMs() / cd.total) : 1;
+        angle = cd.done ? 0 : ((cdOn() ? cdLeftMs() / 1000 : cd.duration) % 60) * 6;
         text = cdText();
       } else {
         frac = holdFrac;
@@ -1969,7 +1995,7 @@
     // Corner hourglass: drains with the timer, trickles once a minute with the stopwatch.
     // (The timer wins when it is in use; otherwise the stopwatch.)
     const gpSand = cdActive()
-      ? (gp.cd.done ? 0 : cdLeftMs() / (gp.cd.duration * 1000))
+      ? (gp.cd.done ? 0 : cdLeftMs() / gp.cd.total)
       : (swActive() ? 1 - ((swMs() / 1000) % 60) / 60 : 1);
     $$('[data-hourglass="hg-corner"]').forEach((svg) => setSand(svg, gpSand));
     $$('[data-hourglass="hg-hold"]').forEach((svg) => setSand(svg, hold.running ? (hold.mode === 'down' ? holdFrac : 1 - holdFrac) : 1));
@@ -2001,16 +2027,16 @@
       controls = '<button class="btn btn-primary btn-block" data-action="timer-stop">Back to it</button>';
     } else if (timer.running) {
       controls = `<div class="btns">
-          <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
-          <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
+          <button class="btn btn-secondary" data-action="timer-add" data-step="-${addSec()}">−${addSec()}s</button>
+          <button class="btn btn-secondary" data-action="timer-add" data-step="${addSec()}">+${addSec()}s</button>
           <button class="btn btn-secondary" data-action="timer-stop">Skip</button>
         </div>
         <button class="text-btn" data-action="timer-hide">Hide</button>`;
     } else {
       controls = `<div class="btns">
-          <button class="btn btn-secondary" data-action="timer-add" data-step="-15">−15s</button>
+          <button class="btn btn-secondary" data-action="timer-add" data-step="-${addSec()}">−${addSec()}s</button>
           <button class="btn btn-primary" data-action="timer-start">Start</button>
-          <button class="btn btn-secondary" data-action="timer-add" data-step="15">+15s</button>
+          <button class="btn btn-secondary" data-action="timer-add" data-step="${addSec()}">+${addSec()}s</button>
         </div>
         <button class="text-btn" data-action="timer-hide">Close</button>`;
     }
@@ -2854,6 +2880,8 @@
       <div class="list">
         <div class="row"><span class="row-label">RPE slider<small>Starts empty for each set. Slide it to rate 6 to 10.</small></span>
           ${sw('toggle-rpe', s.rpeEnabled, 'RPE slider')}</div>
+        <div class="row"><span class="row-label">Add time<small>What the + button adds on the timer and rest timer</small></span>
+          ${seg('set-add-time', String(s.timerAddSec || 15), [['10', '10s'], ['15', '15s'], ['30', '30s'], ['60', '60s']])}</div>
         <div class="row"><span class="row-label">Rest timer<small>Shows in the set entry. The corner hourglass is always there for a stopwatch or timer.</small></span>
           ${sw('toggle-rest', rt.enabled, 'Rest timer')}</div>
         ${rt.enabled ? `
@@ -2970,6 +2998,7 @@
     if (state.settings.restTimer.enabled) timerStop();
     return saveSettings({ restTimer: { enabled: !state.settings.restTimer.enabled } });
   };
+  actions['set-add-time'] = (el) => saveSettings({ timerAddSec: Number(el.dataset.value) });
   actions['set-rest-start'] = (el) => saveSettings({ restTimer: { autoStart: el.dataset.value === 'auto' } });
   actions['rest-step'] = (el) => {
     const next = Math.min(600, Math.max(15, state.settings.restTimer.durationSec + Number(el.dataset.step)));
@@ -3201,6 +3230,8 @@
       return;
     }
     applyTheme();
+    // Opening the app always lands on Log, whatever page the address was left on.
+    if (location.hash && location.hash !== '#log') history.replaceState(null, '', `${location.pathname}${location.search}#log`);
     state.route = parseRoute();
     placeTrack(TABS.indexOf(state.route.tab));
     moveTabIndicator(TABS.indexOf(state.route.tab), { instant: true });
