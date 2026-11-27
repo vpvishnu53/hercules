@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '0.22.2';   // keep in step with VERSION in sw.js
+  const APP_VERSION = '0.23.0';   // keep in step with VERSION in sw.js
   const LB_PER_KG = 2.20462262185;
   const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
   const GROUP_NAMES = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', legs: 'Legs', arms: 'Arms', core: 'Core', other: 'Other' };
@@ -169,7 +169,7 @@
 
   function revealFocused() {
     const el = document.activeElement;
-    if (!isField(el)) return;
+    if (!isField(el) || el.closest('.dd-pop')) return;
     // Inside the sticky entry block the block itself moves with the keyboard; elsewhere scroll to the field.
     if (el.closest('.entry')) return;
     el.scrollIntoView({ block: 'center', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
@@ -672,6 +672,155 @@
   }
   actions['sheet-choose'] = (el) => closeSheet(el.dataset.value);
 
+  /* ------------------------------------------------------------------ */
+  /* Dropdowns                                                           */
+  /* Every <select class="select"> is drawn as a button that opens the   */
+  /* app's own list right under it (or above, if there is no room),      */
+  /* instead of the phone's pop-up. The real <select> stays hidden in    */
+  /* the page, so forms and data-change handlers work as before. Lists   */
+  /* marked data-search get a search box.                                */
+  /* ------------------------------------------------------------------ */
+
+  const dd = { select: null, btn: null, pop: null };
+
+  function enhanceSelect(sel) {
+    if (sel.dataset.dd) return;
+    sel.dataset.dd = '1';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `dd-btn ${sel.className.replace(/\bselect\b/, '').trim()}`;
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    const label = sel.id && document.querySelector(`label[for="${CSS.escape(sel.id)}"]`);
+    if (label) {
+      label.id = label.id || `${sel.id}-label`;
+      btn.setAttribute('aria-labelledby', `${label.id} ${sel.id}-dd`);
+      label.addEventListener('click', (ev) => { ev.preventDefault(); btn.focus(); });
+    }
+    btn.innerHTML = `<span class="dd-val" id="${sel.id ? `${esc(sel.id)}-dd` : ''}"></span>`;
+    sel.hidden = true;
+    sel.tabIndex = -1;
+    sel.after(btn);
+    syncDdButton(sel, btn);
+  }
+  function syncDdButton(sel, btn) {
+    const opt = sel.options[sel.selectedIndex];
+    btn.querySelector('.dd-val').textContent = opt ? opt.textContent : '';
+  }
+  // New selects appear whenever a page or sheet is drawn.
+  new MutationObserver(() => {
+    $$('select.select:not([data-dd])').forEach(enhanceSelect);
+  }).observe(document.body, { childList: true, subtree: true });
+
+  function openDropdown(btn) {
+    const sel = btn.previousElementSibling;
+    if (!sel || sel.tagName !== 'SELECT') return;
+    closeDropdown();
+    const search = sel.hasAttribute('data-search');
+    const pop = document.createElement('div');
+    pop.className = 'dd-pop';
+    pop.innerHTML = `${search ? `<div class="dd-search"><input class="input" type="search" placeholder="Search" autocomplete="off" aria-label="Search"></div>` : ''}
+      <div class="dd-list" role="listbox">${[...sel.options].map((o, i) => `<button type="button" class="dd-opt" role="option"
+        data-i="${i}" data-name="${esc(o.textContent.toLowerCase())}" aria-selected="${i === sel.selectedIndex}">${esc(o.textContent)}</button>`).join('')}
+      <p class="dd-none" hidden>No match</p></div>`;
+    document.body.append(pop);
+    Object.assign(dd, { select: sel, btn, pop });
+    btn.setAttribute('aria-expanded', 'true');
+    btn.classList.add('open');
+    placeDropdown();
+    const cur = $('.dd-opt[aria-selected="true"]', pop);
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
+    (cur || $('.dd-opt', pop) || pop).focus({ preventScroll: true });
+  }
+  function closeDropdown({ refocus = false } = {}) {
+    if (!dd.pop) return;
+    const { btn, pop } = dd;
+    Object.assign(dd, { select: null, btn: null, pop: null });
+    pop.classList.add('closing');
+    setTimeout(() => pop.remove(), reduceMotion.matches ? 0 : 120);
+    btn.setAttribute('aria-expanded', 'false');
+    btn.classList.remove('open');
+    if (refocus && document.contains(btn)) btn.focus({ preventScroll: true });
+  }
+  /** Under the button if it fits, else above; never taller than the room there. */
+  function placeDropdown(ev) {
+    const { btn, pop } = dd;
+    if (!pop) return;
+    if (!document.contains(btn)) { closeDropdown(); return; }
+    // While a sheet slides in, wait for it to settle so the list opens next to the button.
+    const moving = btn.closest('.sheet') && btn.closest('.sheet').getAnimations().some((a) => a.playState === 'running');
+    if (moving && !ev) { setTimeout(placeDropdown, 60); }
+    const r = btn.getBoundingClientRect();
+    const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    const top0 = window.visualViewport ? window.visualViewport.offsetTop : 0;
+    // Scrolled out of sight: close. (Not on opening: a sheet may still be sliding in.)
+    if (ev && ev.type === 'scroll' && (r.bottom < top0 || r.top > top0 + vh)) { closeDropdown(); return; }
+    const below = top0 + vh - r.bottom - 8;
+    const above = r.top - top0 - 8;
+    const want = Math.min(320, pop.scrollHeight);
+    const down = below >= want || below >= above;
+    const room = Math.max(120, Math.min(320, down ? below : above));
+    pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - Math.max(r.width, 180) - 8))}px`;
+    pop.style.width = `${Math.max(r.width, 180)}px`;
+    pop.style.maxHeight = `${room}px`;
+    pop.style.top = down ? `${r.bottom + 4}px` : '';
+    pop.style.bottom = down ? '' : `${window.innerHeight - r.top + 4}px`;
+    pop.classList.toggle('up', !down);
+  }
+  function chooseDropdown(i) {
+    const { select: sel, btn } = dd;
+    if (!sel) return;
+    const changed = sel.selectedIndex !== i;
+    sel.selectedIndex = i;
+    syncDdButton(sel, btn);
+    closeDropdown({ refocus: true });
+    if (changed) sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.dd-btn');
+    if (btn) {
+      ev.preventDefault();
+      if (dd.btn === btn) closeDropdown(); else openDropdown(btn);
+      return;
+    }
+    const opt = ev.target.closest('.dd-opt');
+    if (opt && dd.pop && dd.pop.contains(opt)) { chooseDropdown(Number(opt.dataset.i)); return; }
+  });
+  // A tap anywhere outside closes it.
+  document.addEventListener('pointerdown', (ev) => {
+    if (dd.pop && !dd.pop.contains(ev.target) && !ev.target.closest('.dd-btn')) closeDropdown();
+  }, true);
+  document.addEventListener('input', (ev) => {
+    if (!dd.pop || !dd.pop.contains(ev.target)) return;
+    const q = ev.target.value.trim().toLowerCase();
+    let any = false;
+    $$('.dd-opt', dd.pop).forEach((o) => { o.hidden = !!q && !o.dataset.name.includes(q); any = any || !o.hidden; });
+    $('.dd-none', dd.pop).hidden = any;
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (!dd.pop) return;
+    if (ev.key === 'Escape') { ev.stopPropagation(); closeDropdown({ refocus: true }); return; }
+    if (ev.key === 'Tab') { closeDropdown(); return; }
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      const opts = $$('.dd-opt', dd.pop).filter((o) => !o.hidden);
+      const at = opts.indexOf(document.activeElement);
+      const next = opts[Math.max(0, Math.min(opts.length - 1, at + (ev.key === 'ArrowDown' ? 1 : -1)))];
+      if (next) next.focus();
+    }
+    if (ev.key === 'Enter' && ev.target.matches('.dd-search input')) {
+      ev.preventDefault();
+      const first = $$('.dd-opt', dd.pop).find((o) => !o.hidden);
+      if (first) chooseDropdown(Number(first.dataset.i));
+    }
+  }, true);
+  // It follows its button when the page scrolls or the keyboard opens.
+  document.addEventListener('scroll', (ev) => { if (dd.pop && !dd.pop.contains(ev.target)) placeDropdown(ev); }, true);
+  window.addEventListener('resize', placeDropdown);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', placeDropdown);
+  window.addEventListener('hashchange', () => closeDropdown());
+
   /** Display name of a group: built-in ids get their label, custom groups are their own name. */
   const groupName = (g) => GROUP_NAMES[g] || g;
   /** Every group in use: built-in ones first (Other last), then custom ones A–Z. */
@@ -806,6 +955,7 @@
     entry: null,            // the set being entered: { sessionId, exerciseId, units, weightText, exactKg, reps, rpe, note, showNote }
     dropDraft: null,        // inline drop-set row: { parentId, weightText, reps }
     nextDismissed: {},      // "sessionId|exerciseId" -> true
+    nextSkipped: {},        // sessionId -> exercise ids skipped on the Next card, oldest first
     startPick: null,        // session type chosen on the start screen (null = Freestyle)
     busy: false,
   });
@@ -1088,7 +1238,12 @@
     // Next exercise card: target reached and something in the split is still undone.
     let nextHtml = '';
     if (splitItem && curMain.length >= splitItem.targetSets && !state.nextDismissed[`${session.id}|${cur}`]) {
-      const next = st.items.find((i) => i.exerciseId !== cur && !mainSets(session, i.exerciseId).length);
+      // Undone exercises in split order; skipped ones go to the back, in the order they were skipped.
+      const skipped = state.nextSkipped[session.id] || [];
+      const undone = st.items.filter((i) => i.exerciseId !== cur && !mainSets(session, i.exerciseId).length);
+      const queue = [...undone.filter((i) => !skipped.includes(i.exerciseId)),
+        ...skipped.map((id) => undone.find((i) => i.exerciseId === id)).filter(Boolean)];
+      const next = queue[0];
       if (next) {
         const key = `${session.id}|${cur}|${next.exerciseId}`;
         const fresh = state.nextSeen !== key;
@@ -1096,6 +1251,7 @@
         nextHtml = `<div class="next-card${fresh ? ' enter' : ''}">
           <div class="t">Next: <b>${esc(exerciseName(next.exerciseId))}</b> <span>· ${plural(next.targetSets, 'set')}</span></div>
           <button class="keep" data-action="next-keep" data-id="${esc(next.exerciseId)}">Keep</button>
+          ${queue.length > 1 ? `<button class="skip" data-action="next-skip" data-id="${esc(next.exerciseId)}">Skip</button>` : ''}
           <button class="icon-btn" data-action="next-dismiss" aria-label="Hide suggestion">${ICON.x}</button>
         </div>`;
       }
@@ -1220,9 +1376,12 @@
         rpe: state.settings.rpeEnabled ? e.rpe : null,
         note: e.showNote ? e.note : '',
       });
-      const found = PRs.milestonesForSet(await Store.listSessions(), set.exerciseId, set.id);
+      // Recheck the exercise's whole history, so a set added to an older (reopened)
+      // workout also updates the PRs that came after it.
+      const all = PRs.computeMilestones(await Store.listSessions(), set.exerciseId);
+      await Store.replaceExerciseMilestones(set.exerciseId, all);
+      const found = all.filter((m) => m.setId === set.id);
       if (found.length) {
-        await Store.addMilestones(found);
         showPrBanner(found[0]);
       } else if (navigator.vibrate) {
         navigator.vibrate(15);
@@ -1251,6 +1410,13 @@
   }
   actions['ex-switch'] = (el) => setCurrentExercise(el.dataset.id);
   actions['next-keep'] = (el) => setCurrentExercise(el.dataset.id);
+  /** Suggests the next one instead; the skipped exercise comes back after the others. */
+  actions['next-skip'] = async (el) => {
+    const s = state.activeSession;
+    const list = (state.nextSkipped[s.id] || []).filter((id) => id !== el.dataset.id);
+    state.nextSkipped[s.id] = [...list, el.dataset.id];
+    await render({ keepScroll: true });
+  };
   actions['next-dismiss'] = async () => {
     const s = state.activeSession;
     state.nextDismissed[`${s.id}|${s.currentExerciseId}`] = true;
@@ -2022,6 +2188,7 @@
     $$('[data-hourglass="hg-hold"]').forEach((svg) => setSand(svg, hold.running ? (hold.mode === 'down' ? holdFrac : 1 - holdFrac) : 1));
     const t = $('[data-corner-text]');
     if (t) t.textContent = cdActive() ? cdText() : swActive() ? swText(false) : '';
+    saveClocks();
   }
 
   function refreshRestUi() {
@@ -2170,12 +2337,29 @@
     Object.assign(hold, { overlay: false, done: false, result: null });
     refreshRestUi();
   };
+  /** Logs the result to the exercise the timer was started for, even if another one is showing. */
   actions['hold-log'] = async () => {
-    fillHoldResult();
+    const exId = hold.exerciseId;
+    const result = hold.result;
+    const session = await Store.getActiveSession();
+    if (!session || !result) { holdReset(); return; }
+    if (!state.entry || state.entry.exerciseId !== exId) {
+      await Store.updateSession(session.id, { currentExerciseId: exId });
+      state.dropDraft = null;
+      await render({ keepScroll: true });     // sets up the entry for that exercise
+    }
+    if (state.entry) state.entry.seconds = result;
     Object.assign(hold, { overlay: false, done: false, result: null });
     renderHoldOverlay();
     await actions['log-set']();
   };
+  /** Stops the hold timer and forgets its result (finishing, quitting, deleting everything). */
+  function holdReset() {
+    clearInterval(hold.interval);
+    Object.assign(hold, { running: false, done: false, result: null, overlay: false });
+    wakeOff();
+    refreshRestUi();
+  }
 
   for (const id of ['timer-overlay', 'hold-overlay', 'gp-overlay']) {
     $(`#${id}`).addEventListener('click', (ev) => {
@@ -2193,6 +2377,58 @@
       }
     });
   }
+  /* ----- Clocks survive the app being closed ----- */
+  /*
+   * The clocks only keep start and end times, so they can be saved as they are
+   * and picked up again: a rest that ran out while the app was closed shows as over.
+   */
+  let clocksSaved = '';
+  function saveClocks() {
+    const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
+    const snap = JSON.stringify({
+      timer: pick(timer, ['running', 'done', 'startAt', 'endAt', 'total', 'nextSec', 'overlay']),
+      hold: pick(hold, ['mode', 'running', 'done', 'startAt', 'endAt', 'target', 'acc', 'result', 'overlay', 'exerciseId']),
+      gp: { view: gp.view, overlay: gp.overlay, sw: { ...gp.sw }, cd: { ...gp.cd } },
+    });
+    if (snap === clocksSaved) return;
+    clocksSaved = snap;
+    Store.clocks.save(JSON.parse(snap));
+  }
+  async function restoreClocks() {
+    const c = Store.clocks.load();
+    if (!c) return;
+    try {
+      if (c.timer) Object.assign(timer, c.timer);
+      if (c.hold) Object.assign(hold, c.hold);
+      if (c.gp) {
+        Object.assign(gp, { view: c.gp.view || 'up', overlay: !!c.gp.overlay });
+        Object.assign(gp.sw, c.gp.sw || {});
+        Object.assign(gp.cd, c.gp.cd || {});
+      }
+    } catch (_) { return; }
+    // Anything that ran out more than 10 minutes ago is old news: clear it instead of showing it.
+    const old = (endAt) => Date.now() - endAt > 10 * 60000;
+    if ((timer.running || timer.done) && old(timer.endAt)) Object.assign(timer, { running: false, done: false, overlay: false, nextSec: 0 });
+    if (hold.mode === 'down' && (hold.running || hold.done) && old(hold.endAt)) Object.assign(hold, { running: false, done: false, result: null, overlay: false });
+    if ((gp.cd.running || gp.cd.done) && old(gp.cd.endAt)) Object.assign(gp.cd, { running: false, done: false });
+    if (!gp.running && !gp.cd.done && !gp.cd.paused && !swActive()) gp.overlay = false;
+    // A hold belongs to a workout; with none open (finished elsewhere) it goes.
+    if ((hold.running || hold.result != null) && !(await Store.getActiveSession())) {
+      Object.assign(hold, { running: false, done: false, result: null, overlay: false });
+    }
+    if (timer.running) { timer.interval = setInterval(timerTick, 200); wakeOn(); }
+    if (hold.running) { hold.interval = setInterval(holdTick, 100); wakeOn(); }
+    if (gp.running) gpRun();
+    // The tick finishes anything that ran out while the app was closed.
+    if (timer.running) timerTick();
+    if (hold.running) holdTick();
+    if (gp.running) gpTick();
+    renderOverlay();
+    renderHoldOverlay();
+    renderGpOverlay();
+    paintTimer();
+  }
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       if (timer.running) { wakeOn(); timerTick(); }
@@ -2220,7 +2456,7 @@
     await Store.deleteSession(s.id);
     await recomputeMilestones(s.sets.map((x) => x.exerciseId));
     timerStop();
-    if (hold.running || hold.result != null) { clearInterval(hold.interval); Object.assign(hold, { running: false, done: false, result: null, overlay: false }); }
+    holdReset();
     Object.assign(state, { entry: null, dropDraft: null });
     await render({ animate: true });
     toast('Workout deleted');
@@ -2239,6 +2475,7 @@
       if (!ok) return;
       await Store.deleteSession(s.id);
       timerStop();
+      holdReset();
       Object.assign(state, { entry: null, dropDraft: null });
       await render();
       return;
@@ -2251,6 +2488,7 @@
     if (!ok) return;
     await Store.finishSession(s.id);
     timerStop();
+    holdReset();
     Object.assign(state, { entry: null, dropDraft: null });
     go(`#log/done/${encodeURIComponent(s.id)}`);
   };
@@ -2567,10 +2805,14 @@
    * marks: [{ i, text, place: 'above' | 'below' }] labels a few points, e.g. the highest
    * and lowest bodyweight. The y range gets a little headroom so the labels fit.
    */
-  function chartSvg(points, { line = false, yFormat = (v) => String(v), yInteger = false, marks = [] } = {}) {
+  /**
+   * yLabel: the y axis's name, written up the left edge. A point with inLine: false
+   * gets a dot but stays off the line.
+   */
+  function chartSvg(points, { line = false, yFormat = (v) => String(v), yInteger = false, marks = [], yLabel = '' } = {}) {
     const W = Math.max(280, Math.min(window.innerWidth, 560) - 42);
     const H = 210;
-    const m = { l: 42, r: 12, t: marks.length ? 20 : 12, b: 26 };
+    const m = { l: yLabel ? 56 : 42, r: 12, t: marks.length ? 20 : 12, b: 26 };
     const xs = points.map((p) => p.x);
     let x0 = Math.min(...xs);
     let x1 = Math.max(...xs);
@@ -2594,8 +2836,11 @@
       <text class="tick-label" x="${m.l - 6}" y="${f(sy(t))}" text-anchor="end" dominant-baseline="central">${esc(String(yFormat(t)).replace(/^-/, '−'))}</text>`).join('');
     const xt = dateTicks(Math.ceil(x0), Math.floor(x1)).map(([x, label]) =>
       `<text class="tick-label" x="${f(sx(x))}" y="${H - 8}" text-anchor="middle">${esc(label)}</text>`).join('');
-    const path = line && points.length > 1
-      ? `<path class="ln draw" pathLength="1" d="${points.map((p, i) => `${i ? 'L' : 'M'}${f(sx(p.x))} ${f(sy(p.y))}`).join(' ')}"/>` : '';
+    const linePts = points.filter((p) => p.inLine !== false);
+    const path = line && linePts.length > 1
+      ? `<path class="ln draw" pathLength="1" d="${linePts.map((p, i) => `${i ? 'L' : 'M'}${f(sx(p.x))} ${f(sy(p.y))}`).join(' ')}"/>` : '';
+    const yName = yLabel
+      ? `<text class="axis-label" x="12" y="${f((m.t + H - m.b) / 2)}" text-anchor="middle" transform="rotate(-90 12 ${f((m.t + H - m.b) / 2)})">${esc(yLabel)}</text>` : '';
     const dots = points.map((p, i) => `<circle class="pt${p.hollow ? ' hollow' : ''}" data-pt="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="${p.hollow ? 4.5 : 5}"/>`).join('');
     const hits = points.map((p, i) => `<circle class="hit" tabindex="0" role="button" aria-label="Point ${i + 1} of ${points.length}" data-action="chart-point" data-i="${i}" cx="${f(sx(p.x))}" cy="${f(sy(p.y))}" r="13"/>`).join('');
 
@@ -2609,7 +2854,7 @@
     }).join('');
 
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">
-      ${grid}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}"/>${xt}${path}${labels}${dots}${hits}</svg>`;
+      ${yName}${grid}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}"/>${xt}${path}${labels}${dots}${hits}</svg>`;
   }
 
   actions['chart-point'] = (el) => {
@@ -2685,8 +2930,7 @@
         <span class="sub">${esc(prettyDate(latest.date))} · ${esc(diffText)}</span></div>
       <div class="stats bw-stats">${cell('Latest', latest)}${cell('Highest', days[hi])}${cell('Lowest', days[lo])}</div>
       ${days.length > 1 ? `<div class="chart-box has-detail">
-        <div class="chart-key"><span><i></i>Bodyweight (${Units.unit})</span></div>
-        ${chartSvg(points, { line: true, marks })}
+        ${chartSvg(points, { line: true, marks, yLabel: `Bodyweight (${Units.unit})` })}
       </div>
       <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the weigh-in.</span></div>` : ''}
       ${logBtn}
@@ -2718,7 +2962,7 @@
           `<option value="${v}"${p.view === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select></span></div>`;
     const exSelect = `<div class="field"><label for="pr-ex">Exercise</label>
-      <span class="select-wrap"><select class="select" id="pr-ex" data-change="pr-ex">
+      <span class="select-wrap"><select class="select" id="pr-ex" data-change="pr-ex" data-search>
         ${trained.map((e) => `<option value="${esc(e.id)}"${e.id === p.exerciseId ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}
       </select></span></div>`;
 
@@ -2760,8 +3004,8 @@
     return `<div class="pr-headline"><span class="big num">${milestones.length}<small> milestones</small></span>
         <span class="sub">${plural(nW, 'weight PR')} · ${plural(milestones.length - nW, 'rep PR')} across ${plural(new Set(milestones.map((m) => m.exerciseId)).size, 'exercise')}</span></div>
       <div class="chart-box has-detail">
-        <div class="chart-key"><span><i></i>Weight PR</span><span><i class="hollow"></i>Rep PR</span><span>Up: weight (${Units.unit})</span></div>
-        ${chartSvg(points, { yFormat: (v) => (v === 0 ? 'BW' : String(v)) })}
+        <div class="chart-key"><span><i></i>Weight PR</span><span><i class="hollow"></i>Rep PR</span></div>
+        ${chartSvg(points, { yFormat: (v) => (v === 0 ? 'BW' : String(v)), yLabel: `Weight (${Units.unit})` })}
       </div>
       <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the lift.</span></div>
       <section class="group ms-list"><h2 class="group-title">Newest first</h2>
@@ -2778,18 +3022,28 @@
     let best = series[0];
     for (const s of series) if (typedKg(s.weightKg) > typedKg(best.weightKg) + PRs.TOLERANCE_KG) best = s;
     const hasBw = series.some((s) => s.weightKg == null);
-    const points = series.map((s) => ({
+    const show = seriesShown();
+    const bestPts = show.best ? series.map((s) => ({
       x: dayNum(s.date),
       y: Units.display(typedKg(s.weightKg)),
-      hollow: !prSessions.has(s.sessionId),
+      hollow: true,
       detail: `<span><b class="num">${esc(weightPlain(s.weightKg))} ${timesSign(s)} ${amountText(s)}</b> · ${esc(prettyDate(s.date))}<br>
-        <span class="muted">${prSessions.has(s.sessionId) ? 'Weight PR this session' : 'Heaviest set this session'}</span></span>`,
-    }));
+        <span class="muted">${prSessions.has(s.sessionId) ? 'Heaviest set this session · a weight PR' : 'Heaviest set this session'}</span></span>`,
+    })) : [];
+    const prPts = show.pr ? ms.slice().reverse().map((m) => ({
+      x: dayNum(m.date),
+      y: Units.display(typedKg(m.weightKg)),
+      hollow: false,
+      inLine: !show.best,                       // with session bests hidden, the line joins the PRs
+      detail: msDetail(m),
+    })) : [];
+    const points = [...bestPts, ...prPts];
     return `<div class="pr-headline"><span class="big num">${esc(Units.format(best.weightKg))}<small> ${best.weightKg == null ? '' : Units.unit} ${timesSign(best)} ${amountText(best)}</small></span>
         <span class="sub">Heaviest so far · ${esc(prettyDate(best.date))} · ${plural(series.length, 'session')}</span></div>
       <div class="chart-box has-detail">
-        <div class="chart-key"><span><i></i>Weight PR</span><span><i class="hollow"></i>Heaviest set of a session</span></div>
-        ${chartSvg(points, { line: true, yFormat: (v) => (v === 0 && hasBw ? 'BW' : String(v)) })}
+        ${seriesKey('Weight PRs', 'Heaviest set each session')}
+        ${points.length ? chartSvg(points, { line: true, yFormat: (v) => (v === 0 && hasBw ? 'BW' : String(v)), yLabel: `Weight (${Units.unit})` })
+          : '<p class="empty">No weight PRs yet. Tap “Heaviest set each session” to show the sessions.</p>'}
       </div>
       <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the session.</span></div>
       <section class="group ms-list"><h2 class="group-title">Weight PRs, newest first</h2>
@@ -2828,24 +3082,56 @@
     const show = (n) => (timed ? fmtDuration(n) : plural(n, 'rep'));
     let best = series[0];
     for (const s of series) if (s.reps > best.reps) best = s;
-    const points = series.map((s) => ({
+    const shown = seriesShown();
+    const bestPts = shown.best ? series.map((s) => ({
       x: dayNum(s.date),
       y: s.reps,
-      hollow: !prSessions.has(s.sessionId),
+      hollow: true,
       detail: `<span><b class="num">${show(s.reps)}</b> at ${esc(weightPlain(kg))} · ${esc(prettyDate(s.date))}<br>
-        <span class="muted">${prSessions.has(s.sessionId) ? (timed ? 'Time PR this session' : 'Rep PR this session') : (timed ? 'Longest hold this session' : 'Most reps this session')}</span></span>`,
-    }));
+        <span class="muted">${timed ? 'Longest hold this session' : 'Most reps this session'}${prSessions.has(s.sessionId) ? (timed ? ' · a time PR' : ' · a rep PR') : ''}</span></span>`,
+    })) : [];
+    const prPts = shown.pr ? ms.slice().reverse().map((m) => ({
+      x: dayNum(m.date),
+      y: m.durationSec != null ? m.durationSec : m.reps,
+      hollow: false,
+      inLine: !shown.best,
+      detail: msDetail(m),
+    })) : [];
+    const points = [...bestPts, ...prPts];
     return `<div class="pr-headline"><span class="big num">${timed ? fmtDuration(best.reps) : best.reps}<small> ${timed ? '' : 'reps '}at ${esc(weightPlain(kg))}</small></span>
         <span class="sub">${timed ? 'Longest' : 'Most'} so far · ${esc(prettyDate(best.date))} · ${plural(series.length, 'session')} at this weight</span></div>
       <div class="chart-box has-detail">
-        <div class="chart-key"><span><i></i>${timed ? 'Time PR' : 'Rep PR'}</span><span><i class="hollow"></i>${timed ? 'Longest hold in a session' : 'Most reps in a session'}</span></div>
-        ${chartSvg(points, { line: true, yInteger: !timed, yFormat: timed ? (v) => fmtDuration(Math.max(0, Math.round(v))) : undefined })}
+        ${seriesKey(timed ? 'Time PRs' : 'Rep PRs', timed ? 'Longest hold each session' : 'Most reps each session')}
+        ${points.length ? chartSvg(points, { line: true, yInteger: !timed, yFormat: timed ? (v) => fmtDuration(Math.max(0, Math.round(v))) : undefined, yLabel: timed ? 'Time' : 'Reps' })
+          : `<p class="empty">No ${timed ? 'time' : 'rep'} PRs at this weight yet. Tap “${timed ? 'Longest hold' : 'Most reps'} each session” to show the sessions.</p>`}
       </div>
       <div class="chart-detail" id="chart-detail"><span class="muted">Tap a dot to see the session.</span></div>
       <section class="group ms-list"><h2 class="group-title">${timed ? 'Time' : 'Rep'} PRs at ${esc(weightPlain(kg))}, newest first</h2>
         ${ms.length ? `<div class="list">${ms.map(msRow).join('')}</div>` : `<p class="empty">No ${timed ? 'time' : 'rep'} PRs at this weight yet.</p>`}
       </section>`;
   }
+
+  /* Weight and Rep charts: two series, each shown or hidden by tapping it in the key. */
+  function seriesShown() {
+    const s = state.settings.prSeries || {};
+    return { pr: s.pr !== false, best: s.best !== false };
+  }
+  function seriesKey(prLabel, bestLabel) {
+    const s = seriesShown();
+    const key = (id, on, dot, label) => `<button class="key-btn" data-action="pr-series" data-series="${id}" aria-pressed="${on}">
+      <i${dot}></i>${esc(label)}</button>`;
+    return `<div class="chart-key" role="group" aria-label="Show on the chart">
+      ${key('pr', s.pr, '', prLabel)}${key('best', s.best, ' class="hollow"', bestLabel)}</div>`;
+  }
+  actions['pr-series'] = async (el) => {
+    const s = seriesShown();
+    const id = el.dataset.series;
+    // One series always stays on.
+    if (s[id] && !s[id === 'pr' ? 'best' : 'pr']) { bump(el); return; }
+    s[id] = !s[id];
+    state.settings = await Store.updateSettings({ prSeries: s });
+    await render({ keepScroll: true });
+  };
 
   changes['pr-view'] = (el) => { state.prs.view = el.value; state.prs.showAll = false; return render({ keepScroll: true }); };
   changes['pr-ex'] = (el) => {
@@ -2984,6 +3270,7 @@
     });
     if (!ok) return;
     timerStop();
+    holdReset();
     actions['gp-reset']();
     await Store.resetAll();
     Object.assign(state, { entry: null, dropDraft: null, splitDraft: null, startPick: null, nextDismissed: {} });
@@ -3223,6 +3510,7 @@
       onSubmit: (v) => Store.updateExercise(e.id, { name: v.name, group: v.group, timed: v.timed === '1' }),
     });
     if (!res) return;
+    if (!!res.timed !== !!e.timed) await recomputeMilestones([e.id]);   // reps ↔ time changes what counts as a PR
     await refresh();
     await render({ keepScroll: true });
     toast('Saved. Past sessions show the new name.');
@@ -3250,7 +3538,23 @@
         <p>${esc(err.message)}</p><p class="muted">Nothing was deleted. Reload the page to try again.</p></div>`;
       return;
     }
+    // PR rules changed in 0.23 (reps only compared with reps, seconds with seconds, and
+    // edits to old workouts update later PRs): recheck every saved PR once.
+    if (state.settings.prRules !== 2) {
+      const ids = (await Store.listSessions()).flatMap((s) => s.sets.map((x) => x.exerciseId))
+        .concat((await Store.listMilestones()).map((m) => m.exerciseId));
+      await recomputeMilestones(ids);
+      state.settings = await Store.updateSettings({ prRules: 2 });
+    }
     applyTheme();
+    await restoreClocks();
+    // Another copy of the app (a browser tab and the home-screen app) saved: show its data.
+    Store.onExternalChange(async () => {
+      await refresh();
+      applyTheme();
+      TABS.forEach((t) => stale.add(t));
+      await render({ keepScroll: true });
+    });
     // Opening the app always lands on Log, whatever page the address was left on.
     if (location.hash && location.hash !== '#log') history.replaceState(null, '', `${location.pathname}${location.search}#log`);
     state.route = parseRoute();

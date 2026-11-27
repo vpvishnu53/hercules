@@ -19,6 +19,8 @@
  *    including earlier sets in the same session.
  *  - A set that beats the max weight only gets the weight PR, not a rep PR too.
  *  - A rep PR needs at least one earlier set at the same weight.
+ *  - A rep PR only compares like with like: reps with reps, seconds with
+ *    seconds (an exercise can be switched between the two later).
  *  - Ties are not PRs. Weights within 0.01 kg count as equal, so kg/lb
  *    rounding never makes a false PR.
  *  - Drop sets are ignored completely: they never make PRs, never count as
@@ -68,12 +70,18 @@
         if (evaluate && history.length) {
           const best = Math.max(...history.map((h) => h.w));
           if (w > best + TOLERANCE_KG) {
+            // "Previous" shows the best at that weight, preferring sets logged the same way (reps or time).
+            const atBest = history.filter((h) => sameWeight(h.w, best));
+            const sameKind = atBest.filter((h) => h.timed === isTimed(set));
+            const pool = sameKind.length ? sameKind : atBest;
             out.push(record('weight', set, session, exerciseId, {
               weightKg: best,
-              ...prevAmount(Math.max(...history.filter((h) => sameWeight(h.w, best)).map((h) => h.n)), isTimed(set)),
+              ...prevAmount(Math.max(...pool.map((h) => h.n)), pool[0].timed),
             }));
           } else {
-            const atWeight = history.filter((h) => sameWeight(h.w, w));
+            // Reps are only compared with reps and seconds with seconds, so switching an
+            // exercise between reps and time never turns a rep count into a "time PR".
+            const atWeight = history.filter((h) => sameWeight(h.w, w) && h.timed === isTimed(set));
             if (atWeight.length) {
               const bestN = Math.max(...atWeight.map((h) => h.n));
               if (amount(set) > bestN) {

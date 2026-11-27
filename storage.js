@@ -34,12 +34,34 @@
   /* ------------------------------------------------------------------ */
 
   function createLocalBackend(key = STORAGE_KEY, storage = global.localStorage) {
+    let lastRaw = null;          // the text we last read or wrote, so unchanged data isn't parsed again
     return {
+      /** The saved data if it changed since we last read or wrote it, else null. */
+      async peek() {
+        const raw = storage.getItem(key);
+        if (raw == null || raw === lastRaw) return null;
+        try {
+          const parsed = normalise(JSON.parse(raw));
+          lastRaw = raw;
+          return parsed;
+        } catch (_) {
+          return null;           // unreadable: keep what is in memory; load() reports it on the next start
+        }
+      },
+      /** Calls `fn` when another copy of the app (another tab or window) saves. */
+      watch(fn) {
+        if (!global.addEventListener) return;
+        global.addEventListener('storage', (ev) => {
+          if (ev.key === key || ev.key === null) fn();
+        });
+      },
       async load() {
         const raw = storage.getItem(key);
         if (raw == null) return null;
         try {
-          return JSON.parse(raw);
+          const parsed = JSON.parse(raw);
+          lastRaw = raw;
+          return parsed;
         } catch (err) {
           // Never overwrite data we couldn't read. Keep a copy and stop.
           const backupKey = `${key}.unreadable.${Date.now()}`;
@@ -52,7 +74,9 @@
       },
       async save(db) {
         try {
-          storage.setItem(key, JSON.stringify(db));
+          const raw = JSON.stringify(db);
+          storage.setItem(key, raw);
+          lastRaw = raw;
         } catch (err) {
           throw new StoreError(
             'Could not save: browser storage is full. Export your data, then delete old sessions.',
@@ -306,6 +330,12 @@
   function write(mutate) {
     const run = async () => {
       ready();
+      // Start from what is saved right now, not from memory: another copy of the
+      // app (a browser tab and the home-screen app) may have saved since we loaded.
+      if (backend.peek) {
+        const latest = await backend.peek();
+        if (latest) db = latest;
+      }
       const draft = clone(db);
       const result = mutate(draft);
       await backend.save(draft);
@@ -358,6 +388,34 @@
       }
       queue = Promise.resolve();
       return true;
+    },
+
+    /**
+     * Calls `fn` after another copy of the app saved, once this store has taken
+     * in the new data. Writes already re-read the latest data, so nothing is lost.
+     */
+    onExternalChange(fn) {
+      if (!backend || !backend.watch) return;
+      backend.watch(() => {
+        const run = async () => {
+          const latest = backend.peek ? await backend.peek() : null;
+          if (latest) { db = latest; fn(); }
+        };
+        queue = queue.then(run, run).catch(() => {});
+      });
+    },
+
+    /**
+     * Running stopwatches and timers, saved so they survive the app being
+     * closed. Small and separate from the workout data; never exported.
+     */
+    clocks: {
+      load() {
+        try { return JSON.parse(global.localStorage.getItem(`${STORAGE_KEY}.clocks`) || 'null'); } catch (_) { return null; }
+      },
+      save(obj) {
+        try { global.localStorage.setItem(`${STORAGE_KEY}.clocks`, JSON.stringify(obj)); } catch (_) { /* full or blocked */ }
+      },
     },
 
     /* ---------- Settings ---------- */

@@ -390,6 +390,49 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .input:focus, .select:focus { outline: none; border-color: var(--accent-text); box-shadow: 0 0 0 1px var(--accent-text); }
 .row .select-wrap { flex: none; }
 .row .select { width: auto; min-width: 136px; height: 40px; font-size: 15px; }
+
+/* In-page dropdowns: the button that stands in for a <select>, and its list. */
+.dd-btn {
+  width: 100%; height: 48px; padding: 0 34px 0 12px;
+  display: flex; align-items: center;
+  border: 1px solid var(--line-strong); border-radius: var(--r);
+  background: var(--surface); color: var(--fg); font-size: 16px; text-align: left;
+}
+.dd-btn .dd-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-btn:focus-visible, .dd-btn.open { outline: none; border-color: var(--accent-text); box-shadow: 0 0 0 1px var(--accent-text); }
+.row .dd-btn { width: auto; min-width: 136px; height: 40px; font-size: 15px; }
+.select-wrap::after { transition: transform 160ms var(--ease), margin-top 160ms var(--ease); }
+.select-wrap:has(.dd-btn.open)::after { transform: rotate(-135deg); margin-top: -2px; }
+.dd-pop {
+  position: fixed; z-index: 70;
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line-strong); border-radius: var(--r);
+  background: var(--surface); color: var(--fg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  transform-origin: top center;
+  animation: dd-in 130ms var(--ease);
+}
+.dd-pop.up { transform-origin: bottom center; }
+.dd-pop.closing { animation: dd-out 110ms var(--ease) forwards; pointer-events: none; }
+@keyframes dd-in { from { opacity: 0; transform: scaleY(0.92); } to { opacity: 1; transform: none; } }
+@keyframes dd-out { to { opacity: 0; } }
+.dd-search { padding: 8px; border-bottom: 1px solid var(--line); flex: none; }
+.dd-search .input { height: 40px; }
+.dd-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 0; }
+.dd-opt {
+  display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0 12px 0 36px;
+  position: relative; text-align: left; font-size: 15px;
+}
+.dd-opt:hover, .dd-opt:focus-visible { background: var(--hover); outline: none; }
+.dd-opt[aria-selected="true"] { color: var(--accent-text); font-weight: 600; }
+.dd-opt[aria-selected="true"]::before {
+  content: ""; position: absolute; left: 15px; top: 50%;
+  width: 5px; height: 10px; margin-top: -7px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+.dd-none { margin: 0; padding: 12px; color: var(--muted); font-size: 14px; }
 .form-error { margin: 0; color: var(--danger); font-size: 14px; white-space: pre-line; }
 
 .page-pad { padding: 16px; display: grid; gap: 16px; }
@@ -556,6 +599,7 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .next-card .t { flex: 1; min-width: 0; font-size: 14px; }
 .next-card .t b { font-weight: 700; }
 .next-card .t span { color: var(--muted); }
+.next-card .skip { min-height: 36px; border: 1px solid var(--line-strong); color: var(--fg); border-radius: var(--r); padding: 0 12px; font-size: 14px; font-weight: 600; }
 .next-card .keep { min-height: 36px; border: 1px solid var(--accent-text); color: var(--accent-text); border-radius: var(--r); padding: 0 14px; font-size: 14px; font-weight: 700; }
 
 /*
@@ -824,6 +868,10 @@ a.row, button.row { color: var(--fg); text-decoration: none; }
 .chart-key span { display: inline-flex; align-items: center; gap: 6px; }
 .chart-key i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--mark); }
 .chart-key i.hollow { background: var(--surface); box-shadow: inset 0 0 0 2px var(--mark); }
+.chart-key .key-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 2px; color: var(--fg); font-size: 12px; transition: opacity 160ms var(--ease); }
+.chart-key .key-btn[aria-pressed="false"] { opacity: 0.45; text-decoration: line-through; }
+.chart-key .key-btn[aria-pressed="false"] i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.chart .axis-label { fill: var(--muted); font-size: 11px; font-weight: 600; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .base { stroke: var(--line-strong); stroke-width: 1; }
 .chart .tick-label { fill: var(--muted); font-family: var(--f-num); font-size: 11px; font-variant-numeric: tabular-nums; }
